@@ -131,8 +131,51 @@ for (const puzzle of PUZZLES) {
   }
 }
 
+// Precomputed playout lines: every line must replay legally, reach a
+// terminal position, and agree with the square's verdict.
+let lineCount = 0;
+for (const puzzle of PUZZLES) {
+  if (!puzzle.lines) continue;
+  for (const [mode, bySquare] of Object.entries(puzzle.lines)) {
+    const turn = mode === 'own' ? puzzle.player : puzzle.player === 'w' ? 'b' : 'w';
+    const winners = mode === 'own'
+      ? [puzzle.solution].filter(Boolean)
+      : puzzle.p4 ? puzzle.p4.solutions : [puzzle.p3?.solution].filter(Boolean);
+    // Squares the player can actually reach in this mode; lines for blocked
+    // squares (e.g. added to exclusions by self-healing) are inert.
+    const blocked = mode === 'own'
+      ? puzzle.excluded ?? []
+      : puzzle.p4 ? [] : puzzle.p3?.excluded ?? [];
+    for (const [sq, line] of Object.entries(bySquare)) {
+      if (blocked.includes(sq)) continue;
+      lineCount++;
+      const map = fenToMap(puzzle.fen);
+      map[sq] = { type: puzzle.place[0], color: puzzle.player };
+      const g = new Chess(buildFen(map, turn));
+      const moves = line.m.split(' ');
+      if (line.e.split(' ').length !== moves.length) {
+        fail(puzzle, `line ${mode}/${sq}: evals/moves length mismatch`);
+      }
+      try {
+        for (const uci of moves) {
+          g.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] });
+        }
+      } catch (err) {
+        fail(puzzle, `line ${mode}/${sq}: illegal move in stored line (${err.message.slice(0, 60)})`);
+        continue;
+      }
+      if (!g.isGameOver()) { fail(puzzle, `line ${mode}/${sq}: does not reach a terminal position`); continue; }
+      const playerWon = g.isCheckmate() && g.turn() !== puzzle.player;
+      const shouldWin = winners.includes(sq);
+      if (playerWon !== shouldWin) {
+        fail(puzzle, `line ${mode}/${sq}: verdict mismatch (playerWon=${playerWon}, expected ${shouldWin ? 'win' : 'not-win'})`);
+      }
+    }
+  }
+}
+
 if (failures) {
   console.error(`\n${failures} puzzle problem(s) found.`);
   process.exit(1);
 }
-console.log(`✓ All ${PUZZLES.length} puzzles are valid.`);
+console.log(`✓ All ${PUZZLES.length} puzzles are valid (${lineCount} playout lines verified).`);

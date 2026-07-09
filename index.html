@@ -25,6 +25,16 @@
       </section>
 
       <aside class="panel">
+        <!-- Controls first: on mobile this puts Play right under the board -->
+        <div class="controls">
+          <button id="reset-btn" class="secondary">Reset pieces</button>
+          <button id="play-btn" class="primary" disabled>▶ Play it out</button>
+          <button id="stop-btn" class="danger hidden">■ Stop</button>
+          <button id="retry-btn" class="secondary hidden">↺ Adjust &amp; retry</button>
+        </div>
+
+        <div class="status" id="status">Loading engines…</div>
+
         <div class="proto-switch" id="proto-switch" role="tablist" aria-label="Game prototype">
           <button data-proto="1">
             <strong>Prototype 1</strong>
@@ -53,17 +63,8 @@
         <h2 id="puzzle-name"></h2>
         <p id="puzzle-desc" class="desc"></p>
 
-        <div class="status" id="status">Loading engines…</div>
-
         <div class="tray-label" id="tray-label">Pieces to place — drag onto the board, or click a piece then a square:</div>
         <div class="tray" id="tray"></div>
-
-        <div class="controls">
-          <button id="reset-btn" class="secondary">Reset pieces</button>
-          <button id="play-btn" class="primary" disabled>▶ Play it out</button>
-          <button id="stop-btn" class="danger hidden">■ Stop</button>
-          <button id="retry-btn" class="secondary hidden">↺ Adjust &amp; retry</button>
-        </div>
 
         <div class="speed-row">
           <label for="speed-slider">Move speed</label>

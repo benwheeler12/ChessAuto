@@ -9,8 +9,12 @@ export class Engine {
     this.listeners = new Set();
   }
 
-  async init() {
-    if (this.worker) return;
+  init() {
+    this.initPromise ??= this.#doInit();
+    return this.initPromise;
+  }
+
+  async #doInit() {
     const url = `${import.meta.env.BASE_URL}stockfish/stockfish-18-lite-single.js`;
     this.worker = new Worker(url);
     this.worker.onmessage = (e) => {
