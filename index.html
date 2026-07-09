@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ChessAuto — Build a Winning Position</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♛</text></svg>" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>♛ ChessAuto</h1>
+      <p class="tagline">Place the missing pieces, press play, and let the engines decide if your position wins.</p>
+    </header>
+
+    <main>
+      <section class="board-area">
+        <div class="eval-bar" id="eval-bar" title="Engine evaluation">
+          <div class="eval-fill" id="eval-fill"></div>
+        </div>
+        <div class="board-wrap">
+          <div class="board" id="board"></div>
+          <div class="banner hidden" id="banner"></div>
+        </div>
+      </section>
+
+      <aside class="panel">
+        <div class="puzzle-nav">
+          <button id="prev-puzzle" title="Previous puzzle">◀</button>
+          <select id="puzzle-select"></select>
+          <button id="next-puzzle" title="Next puzzle">▶</button>
+        </div>
+
+        <h2 id="puzzle-name"></h2>
+        <p id="puzzle-desc" class="desc"></p>
+
+        <div class="status" id="status">Loading engines…</div>
+
+        <div class="tray-label" id="tray-label">Pieces to place — drag onto the board, or click a piece then a square:</div>
+        <div class="tray" id="tray"></div>
+
+        <div class="controls">
+          <button id="reset-btn" class="secondary">Reset pieces</button>
+          <button id="play-btn" class="primary" disabled>▶ Play it out</button>
+          <button id="stop-btn" class="danger hidden">■ Stop</button>
+          <button id="retry-btn" class="secondary hidden">↺ Adjust &amp; retry</button>
+        </div>
+
+        <div class="progress hidden" id="progress"></div>
+        <ol class="movelist" id="movelist"></ol>
+      </aside>
+    </main>
+
+    <footer>
+      Both sides are played by <a href="https://stockfishchess.org/" target="_blank" rel="noopener">Stockfish</a> running in your browser.
+      You win if your side checkmates or ends the playout with a decisive advantage.
+    </footer>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

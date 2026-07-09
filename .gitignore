@@ -1,0 +1,4 @@
+node_modules/
+dist/
+# Copied from node_modules/stockfish at dev/build time
+public/stockfish/

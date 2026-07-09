@@ -1,0 +1,27 @@
+{
+  "name": "chessauto",
+  "version": "1.0.0",
+  "description": "Place the missing pieces to build a winning chess position, then watch two engines play it out.",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/benwheeler12/ChessAuto"
+  },
+  "license": "MIT",
+  "scripts": {
+    "postinstall": "node scripts/copy-stockfish.mjs",
+    "predev": "node scripts/copy-stockfish.mjs",
+    "dev": "vite",
+    "prebuild": "node scripts/copy-stockfish.mjs",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node scripts/validate-puzzles.mjs"
+  },
+  "dependencies": {
+    "chess.js": "^1.4.0",
+    "stockfish": "^18.0.8"
+  },
+  "devDependencies": {
+    "vite": "^8.1.3"
+  }
+}
