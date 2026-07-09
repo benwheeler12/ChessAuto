@@ -1,3 +1,5 @@
+import '@fontsource-variable/inter';
+import '@fontsource-variable/space-grotesk';
 import { Chess, validateFen } from 'chess.js';
 import { PUZZLES } from './puzzles.js';
 import { Engine, scoreToWhiteCp } from './engine.js';
@@ -535,16 +537,22 @@ function finish(game) {
   els.banner.innerHTML = '';
   els.banner.appendChild(win ? buildConfettiRain() : buildWaves());
   const h2 = document.createElement('h2');
-  // Letters animate in one by one.
+  // Letters animate in one by one, grouped into unbreakable words so the
+  // title never wraps mid-word on narrow screens.
   let i = 0;
-  for (const ch of title) {
-    const span = document.createElement('span');
-    span.className = 'ltr';
-    span.textContent = ch;
-    if (ch === ' ') span.style.whiteSpace = 'pre';
-    span.style.animationDelay = `${i * 40}ms`;
-    h2.appendChild(span);
-    i++;
+  for (const word of title.split(' ')) {
+    const wordSpan = document.createElement('span');
+    wordSpan.className = 'word';
+    for (const ch of word) {
+      const span = document.createElement('span');
+      span.className = 'ltr';
+      span.textContent = ch;
+      span.style.animationDelay = `${i * 40}ms`;
+      wordSpan.appendChild(span);
+      i++;
+    }
+    h2.append(wordSpan, ' ');
+    i++; // count the space so the stagger rhythm carries across words
   }
   const p = document.createElement('p');
   p.textContent = detail;
