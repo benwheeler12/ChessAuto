@@ -245,7 +245,7 @@ async function play() {
   els.movelist.innerHTML = '';
   els.banner.classList.add('hidden');
   els.progress.classList.remove('hidden');
-  board.clearHighlights('hint', 'bad', 'selected');
+  board.clearHighlights('hint', 'bad', 'selected', 'option');
 
   const game = new Chess(currentFen());
   let plies = 0;
@@ -291,11 +291,22 @@ async function play() {
 }
 
 function appendMove(played, game) {
-  const li = document.createElement('li');
-  li.value = played.color === 'w' ? game.moveNumber() : game.moveNumber() - 1;
-  li.textContent = played.color === 'w' ? played.san : `… ${played.san}`;
-  els.movelist.appendChild(li);
-  li.scrollIntoView({ block: 'nearest' });
+  const moveNo = played.color === 'w' ? game.moveNumber() : game.moveNumber() - 1;
+  const last = els.movelist.lastElementChild;
+  if (played.color === 'b' && last && Number(last.value) === moveNo && !last.dataset.complete) {
+    // Black's reply joins White's move on the same row.
+    last.textContent += `  ${played.san}`;
+    last.dataset.complete = '1';
+  } else {
+    const li = document.createElement('li');
+    li.value = moveNo;
+    li.textContent = played.color === 'w' ? played.san : `… ${played.san}`;
+    if (played.color === 'b') li.dataset.complete = '1';
+    els.movelist.appendChild(li);
+  }
+  // Keep the newest move visible by scrolling the list itself — never the
+  // page (scrollIntoView yanked the viewport down on mobile).
+  els.movelist.scrollTop = els.movelist.scrollHeight;
 }
 
 function finish(game) {
