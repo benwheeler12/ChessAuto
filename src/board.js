@@ -97,7 +97,7 @@ export class Board {
    * @param {{from: string, to: string}[]} moves
    * @param {Record<string, {type: string, color: string}>} newPosition
    */
-  animateMoves(moves, newPosition, duration = 220) {
+  animateMoves(moves, newPosition, duration = 140) {
     const boardRect = this.el.getBoundingClientRect();
     const floats = [];
     for (const { from, to } of moves) {

@@ -23,6 +23,10 @@ pieces removed; put it back so your side wins the engine playout):
 - **Prototype 2 — find the hidden square**: place the piece anywhere, but the
   *obvious* winning squares are blocked (marked ✕). Exactly one of the
   remaining squares wins — find it.
+- **Prototype 3 — opponent moves first**: like prototype 2, but after you
+  place the piece the *opponent* gets the first move. Instant-capture
+  placements don't work here; you have to think a move deeper. (Analysed
+  separately by the generator with the opponent to move.)
 
 Prototype 1 also includes the original hand-written free-placement puzzles
 (missing pieces in a tray, put them anywhere legal) as a sandbox at the end of
