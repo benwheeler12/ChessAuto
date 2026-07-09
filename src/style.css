@@ -113,6 +113,15 @@ main {
   cursor: pointer;
 }
 
+/* Candidate squares in generated puzzles (pick one of these) */
+.square.option {
+  background-image: radial-gradient(circle, rgba(20, 30, 15, 0.45) 24%, transparent 26%);
+  cursor: pointer;
+}
+.square.option:hover {
+  background-image: radial-gradient(circle, rgba(255, 210, 77, 0.85) 30%, transparent 32%);
+}
+
 .piece {
   width: 100%;
   height: 100%;

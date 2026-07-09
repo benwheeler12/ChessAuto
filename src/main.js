@@ -101,11 +101,26 @@ function validatePosition() {
 
 function refreshSetup() {
   board.setPosition(currentMap());
-  board.clearHighlights('hint', 'bad', 'last-move', 'selected');
+  board.clearHighlights('hint', 'bad', 'last-move', 'selected', 'option');
   board.setPlacing(state.selectedTray >= 0);
   renderTray();
 
   const remaining = state.tray.filter((t) => !t.square).length;
+
+  // Candidate-constrained puzzles: auto-select the piece and mark the
+  // squares it may go to.
+  if (state.puzzle.candidates) {
+    if (remaining > 0 && state.selectedTray === -1) {
+      state.selectedTray = state.tray.findIndex((t) => !t.square);
+      board.setPlacing(true);
+      renderTray();
+    }
+    const map = currentMap();
+    for (const sq of state.puzzle.candidates) {
+      if (!map[sq]) board.highlight(sq, 'option');
+    }
+  }
+
   let error = null;
   if (remaining === 0) error = validatePosition();
 
@@ -122,9 +137,13 @@ function refreshSetup() {
   } else if (error) {
     setStatus(error, true);
   } else if (remaining > 0) {
-    setStatus(`Place ${remaining} more piece${remaining > 1 ? 's' : ''}. Click a placed piece to pick it back up.`);
+    setStatus(state.puzzle.candidates
+      ? `Place your ${pieceName(state.tray[0].type)} on one of the ${state.puzzle.candidates.length} highlighted squares. Exactly one of them wins.`
+      : `Place ${remaining} more piece${remaining > 1 ? 's' : ''}. Click a placed piece to pick it back up.`);
   } else {
-    setStatus('Position set! Press “Play it out” and the engines will battle it out.');
+    setStatus(state.puzzle.candidates
+      ? 'Piece placed — press “Play it out”, or click it to try a different square.'
+      : 'Position set! Press “Play it out” and the engines will battle it out.');
   }
 }
 
@@ -175,6 +194,10 @@ function handleSquareClick(square) {
 function placeSelected(square) {
   const item = state.tray[state.selectedTray];
   if (!item || state.phase !== 'setup') return;
+  if (state.puzzle.candidates && !state.puzzle.candidates.includes(square)) {
+    setStatus('This puzzle only allows the highlighted squares.', true);
+    return;
+  }
   if (currentMap()[square]) {
     setStatus('That square is occupied — pick an empty one.', true);
     return;

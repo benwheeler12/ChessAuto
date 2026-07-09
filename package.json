@@ -15,7 +15,8 @@
     "prebuild": "node scripts/copy-stockfish.mjs",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node scripts/validate-puzzles.mjs"
+    "test": "node scripts/validate-puzzles.mjs",
+    "generate": "node scripts/generate-puzzles.mjs"
   },
   "dependencies": {
     "chess.js": "^1.4.0",

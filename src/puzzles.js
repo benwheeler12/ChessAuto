@@ -1,15 +1,24 @@
 // Puzzle definitions.
 //
 // Each puzzle is a "semicomplete" chess position: a legal position from which
-// a few of the player's pieces have been removed. The player must place the
-// missing pieces (listed in `place`) on empty squares so that the resulting
-// position is winning for their color, then let the engines play it out.
+// one or more of the player's pieces have been removed. The player must place
+// the missing pieces (listed in `place`) so that the resulting position is
+// winning for their color, then let the engines play it out.
 //
-//   fen    - the semicomplete position, with the player's side to move
-//   player - which color the user is constructing a win for ('w' | 'b')
-//   place  - piece types (lowercase) the player must put back on the board
+//   fen        - the semicomplete position, with the player's side to move
+//   player     - which color the user is constructing a win for ('w' | 'b')
+//   place      - piece types (lowercase) the player must put back on the board
+//   candidates - optional: restricts placement to these squares. Generated
+//                puzzles (from grandmaster games, mined by
+//                scripts/generate-puzzles.mjs) offer 2-3 squares of which
+//                exactly one is winning and the rest are losing.
+//
+// GENERATED puzzles come first; the hand-written free-placement classics
+// follow as a sandbox.
 
-export const PUZZLES = [
+import GENERATED from './generated-puzzles.js';
+
+const CLASSICS = [
   {
     id: 'queens-entrance',
     name: "Queen's Entrance",
@@ -90,3 +99,5 @@ export const PUZZLES = [
     place: ['q', 'r', 'b'],
   },
 ];
+
+export const PUZZLES = [...GENERATED, ...CLASSICS];

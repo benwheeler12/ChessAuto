@@ -13,6 +13,15 @@ delivers checkmate. Draws don't count.
 
 ## How to play
 
+**Grandmaster puzzles** (the main mode): a sharp position from a real
+grandmaster game is shown with one of your pieces removed, and 2–3 candidate
+squares are highlighted. Exactly one of them makes your position completely
+winning — the others lose. Click a square, press play, and find out which kind
+you picked.
+
+**Classic free-placement puzzles**: the missing pieces appear in a tray and you
+may put them anywhere legal.
+
 1. Pick a puzzle — the missing pieces appear in the tray.
 2. Drag a piece onto an empty square (or click the piece, then a square).
    Click a placed piece to pick it back up.
@@ -50,6 +59,28 @@ isolation headers are required.
   (lite NNUE build, ~7 MB), one per color, at 300 ms per move.
 - **Puzzles**: defined in `src/puzzles.js` as `{ fen, player, place }` —
   adding a new puzzle is a single object; `npm test` sanity-checks them all.
+
+## Generating puzzles from grandmaster games
+
+`npm run generate` mines real games for candidate-square puzzles
+(`scripts/generate-puzzles.mjs`):
+
+1. Replays each PGN in `data/games.pgn` and samples middlegame positions,
+   skipping ones that were already completely one-sided.
+2. Removes one of the side-to-move's pieces (queens and rooks first) and has
+   Stockfish evaluate putting it back on **every** legal empty square.
+3. Keeps a position only when placement is *sharp*: at most a handful of
+   squares win, at least one is completely winning (≥ +3 after deep
+   verification), and there are plausible placements that are clearly losing
+   (≤ −3).
+4. Emits `src/generated-puzzles.js` with 2–3 candidate squares per puzzle —
+   exactly one winning — plus source-game metadata and the verified evals.
+
+Point it at any PGN collection with
+`node scripts/generate-puzzles.mjs --in path/to/games.pgn`; tune with
+`--max`, `--per-game`, `--shallow` (ms per scan eval) and `--deep`
+(ms per verification eval). The bundled `data/games.pgn` holds famous
+public-domain games (Morphy, Anderssen, Fischer, Rubinstein, Kasparov…).
 
 ## Credits
 
