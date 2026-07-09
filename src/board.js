@@ -1,8 +1,15 @@
 // Renders the chessboard and forwards user interaction (clicks and
 // drag-and-drop from the piece tray) back to the app.
+//
+// Pieces are drawn with the cburnett SVG set (see src/assets/pieces/) via
+// `pc-*` CSS classes shared with the tray.
 
 const FILES = 'abcdefgh';
-export const GLYPHS = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
+
+/** CSS class that paints a piece image, e.g. pieceClass('w', 'q') -> 'pc-wq'. */
+export function pieceClass(color, type) {
+  return `pc-${color}${type}`;
+}
 
 export class Board {
   /**
@@ -59,6 +66,9 @@ export class Board {
       cell.dataset.square = name;
       cell.classList.toggle('light', (file + rank) % 2 === 1);
       cell.classList.toggle('dark', (file + rank) % 2 === 0);
+      // Coordinate labels along the left and bottom edges.
+      cell.dataset.rankLabel = col === 0 ? String(rank) : '';
+      cell.dataset.fileLabel = row === 7 ? FILES[file] : '';
       this.squares.set(name, cell);
     }
   }
@@ -74,14 +84,66 @@ export class Board {
       }
       if (!span) {
         span = document.createElement('span');
-        span.className = 'piece';
         cell.appendChild(span);
       }
-      span.textContent = GLYPHS[piece.type];
-      span.classList.toggle('w', piece.color === 'w');
-      span.classList.toggle('b', piece.color === 'b');
-      span.classList.toggle('placed', Boolean(piece.placed));
+      span.className = `piece ${pieceClass(piece.color, piece.type)}${piece.placed ? ' placed' : ''}`;
     }
+  }
+
+  /**
+   * Slide pieces from their squares to their destinations, then apply the
+   * final position. `moves` may hold several movements (castling moves two
+   * pieces at once); captured pieces stay visible until the slide completes.
+   * @param {{from: string, to: string}[]} moves
+   * @param {Record<string, {type: string, color: string}>} newPosition
+   */
+  animateMoves(moves, newPosition, duration = 220) {
+    const boardRect = this.el.getBoundingClientRect();
+    const floats = [];
+    for (const { from, to } of moves) {
+      const fromCell = this.squares.get(from);
+      const toCell = this.squares.get(to);
+      const pieceEl = fromCell?.querySelector('.piece');
+      if (!pieceEl || !toCell) continue;
+      const f = fromCell.getBoundingClientRect();
+      const t = toCell.getBoundingClientRect();
+      const float = pieceEl.cloneNode(true);
+      float.classList.add('floating');
+      float.style.width = `${f.width}px`;
+      float.style.height = `${f.height}px`;
+      float.style.transitionDuration = `${duration}ms`;
+      float.style.transform = `translate(${f.left - boardRect.left}px, ${f.top - boardRect.top}px)`;
+      pieceEl.remove();
+      this.el.appendChild(float);
+      floats.push({ float, x: t.left - boardRect.left, y: t.top - boardRect.top });
+    }
+    if (!floats.length) {
+      this.setPosition(newPosition);
+      return Promise.resolve();
+    }
+    void this.el.offsetWidth; // commit starting transforms before transitioning
+    for (const { float, x, y } of floats) {
+      float.style.transform = `translate(${x}px, ${y}px)`;
+    }
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        for (const { float } of floats) float.remove();
+        this.setPosition(newPosition);
+        resolve();
+      }, duration + 30);
+    });
+  }
+
+  /** Play a quick drop-in animation on the piece at `square` (used when placing). */
+  dropIn(square) {
+    const piece = this.squares.get(square)?.querySelector('.piece');
+    if (!piece) return;
+    piece.classList.add('drop-in');
+    piece.addEventListener('animationend', () => piece.classList.remove('drop-in'), { once: true });
+  }
+
+  setPlacing(placing) {
+    this.el.classList.toggle('placing', placing);
   }
 
   clearHighlights(...classes) {

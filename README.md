@@ -54,3 +54,13 @@ isolation headers are required.
   deeper 2-second evaluation of the final position decides the result.
 - **Puzzles**: defined in `src/puzzles.js` as `{ fen, player, place, moveCap }` —
   adding a new puzzle is a single object; `npm test` sanity-checks them all.
+
+## Credits
+
+Piece graphics are the classic
+[cburnett chess set](https://commons.wikimedia.org/wiki/Category:SVG_chess_pieces/Standard)
+by Colin M.L. Burnett (with contributions by Rfc1394), licensed
+[CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/), extracted from
+the [cm-chessboard](https://github.com/shaack/cm-chessboard) sprite by Stefan
+Haack. (Chess.com's own piece sets are proprietary; this is the well-known
+freely licensed set used by Wikipedia and lichess.)

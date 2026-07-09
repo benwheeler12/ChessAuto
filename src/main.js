@@ -1,7 +1,7 @@
 import { Chess, validateFen } from 'chess.js';
 import { PUZZLES } from './puzzles.js';
 import { Engine, scoreToWhiteCp } from './engine.js';
-import { Board, GLYPHS } from './board.js';
+import { Board, pieceClass } from './board.js';
 import { fenToMap, buildFen, flipTurn, rankOf } from './fen.js';
 
 const MOVETIME_MS = 300; // per engine move during the playout
@@ -104,6 +104,7 @@ function validatePosition() {
 function refreshSetup() {
   board.setPosition(currentMap());
   board.clearHighlights('hint', 'bad', 'last-move', 'selected');
+  board.setPlacing(state.selectedTray >= 0);
   renderTray();
 
   const remaining = state.tray.filter((t) => !t.square).length;
@@ -142,8 +143,7 @@ function renderTray() {
   state.tray.forEach((item, i) => {
     if (item.square) return;
     const div = document.createElement('div');
-    div.className = `tray-piece ${state.puzzle.player}`;
-    div.textContent = GLYPHS[item.type];
+    div.className = `tray-piece ${pieceClass(state.puzzle.player, item.type)}`;
     div.draggable = true;
     div.title = `Place your ${pieceName(item.type)}`;
     if (i === state.selectedTray) div.classList.add('selected');
@@ -188,6 +188,7 @@ function placeSelected(square) {
   item.square = square;
   state.selectedTray = -1;
   refreshSetup();
+  board.dropIn(square);
   // Flag the offending piece if the position became illegal.
   if (state.tray.every((t) => t.square) && validatePosition()) {
     board.highlight(square, 'bad');
@@ -252,10 +253,16 @@ async function play() {
 
     lastWhiteCp = scoreToWhiteCp(score, sideToMove);
     setEvalBar(lastWhiteCp);
-    board.setPosition(fenToMap(game.fen()));
     board.clearHighlights('last-move');
     board.highlight(played.from, 'last-move');
     board.highlight(played.to, 'last-move');
+    // Castling slides the rook along with the king.
+    const slides = [{ from: played.from, to: played.to }];
+    const homeRank = played.color === 'w' ? 1 : 8;
+    if (played.flags.includes('k')) slides.push({ from: `h${homeRank}`, to: `f${homeRank}` });
+    if (played.flags.includes('q')) slides.push({ from: `a${homeRank}`, to: `d${homeRank}` });
+    await board.animateMoves(slides, fenToMap(game.fen()));
+    if (runId !== state.runId) return;
     appendMove(played, game);
     els.progress.textContent = `Move ${Math.ceil(plies / 2)} of ${puzzle.moveCap}`;
   }
