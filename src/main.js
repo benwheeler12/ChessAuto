@@ -5,6 +5,11 @@ import { Board, pieceClass } from './board.js';
 import { fenToMap, buildFen, flipTurn, rankOf } from './fen.js';
 
 const MOVETIME_MS = 300; // per engine move during the playout
+const MOVE_ANIM_MS = 140; // normal piece-slide duration
+const SLOW_ANIM_MS = 500; // slide duration once the finish is near
+const SLOW_PAUSE_MS = 450; // extra pause between the final moves
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // ---- DOM ----
 const $ = (id) => document.getElementById(id);
@@ -44,10 +49,14 @@ const state = {
 //   1 — candidate squares: place the piece on one of 2-3 marked squares
 //   2 — hidden square: place anywhere, but the obvious winning squares are
 //       blocked; exactly one of the remaining squares wins
+//   3 — like 2, but the OPPONENT moves first after placement, so instant
+//       captures don't work (analysed separately by the generator)
 let activePuzzles = [];
 
 function puzzlesForProto(proto) {
-  return proto === 2 ? PUZZLES.filter((p) => p.excluded) : PUZZLES;
+  if (proto === 2) return PUZZLES.filter((p) => p.excluded);
+  if (proto === 3) return PUZZLES.filter((p) => p.p3);
+  return PUZZLES.filter((p) => p.candidates || !p.source);
 }
 
 /** Placement is restricted to the puzzle's candidate squares (prototype 1). */
@@ -55,9 +64,23 @@ function usingCandidates() {
   return state.proto === 1 && Boolean(state.puzzle.candidates);
 }
 
-/** Placement is open except for blocked squares (prototype 2). */
+/** Placement is open except for blocked squares (prototypes 2 and 3). */
 function usingExclusions() {
-  return state.proto === 2 && Boolean(state.puzzle.excluded);
+  return Boolean(activeExclusions());
+}
+
+/** The blocked-square list for the active prototype, if any. */
+function activeExclusions() {
+  if (state.proto === 2 && state.puzzle.excluded) return state.puzzle.excluded;
+  if (state.proto === 3 && state.puzzle.p3) return state.puzzle.p3.excluded;
+  return null;
+}
+
+/** Prototype 3 flips the side to move: the opponent replies first. */
+function currentTurn() {
+  const baseTurn = state.puzzle.fen.split(' ')[1];
+  if (state.proto === 3 && state.puzzle.p3) return baseTurn === 'w' ? 'b' : 'w';
+  return baseTurn;
 }
 
 const whiteEngine = new Engine('white');
@@ -102,7 +125,7 @@ function currentMap() {
 }
 
 function currentFen() {
-  return buildFen(currentMap(), state.puzzle.fen.split(' ')[1]);
+  return buildFen(currentMap(), currentTurn());
 }
 
 /** Validate the fully-constructed position. Returns an error string or null. */
@@ -140,7 +163,7 @@ function refreshSetup() {
       if (!map[sq]) board.highlight(sq, 'option');
     }
   } else if (usingExclusions()) {
-    for (const sq of state.puzzle.excluded) board.highlight(sq, 'excluded');
+    for (const sq of activeExclusions()) board.highlight(sq, 'excluded');
   }
 
   let error = null;
@@ -162,7 +185,7 @@ function refreshSetup() {
     if (usingCandidates()) {
       setStatus(`Place your ${pieceName(state.tray[0].type)} on one of the ${state.puzzle.candidates.length} highlighted squares. Exactly one of them wins.`);
     } else if (usingExclusions()) {
-      setStatus(`Place your ${pieceName(state.tray[0].type)} anywhere except the ✕ squares — those win too obviously. Exactly one legal square wins.`);
+      setStatus(`Place your ${pieceName(state.tray[0].type)} anywhere except the ✕ squares — those win too obviously. Exactly one legal square wins.${state.proto === 3 ? ' Careful: your opponent moves first!' : ''}`);
     } else {
       setStatus(`Place ${remaining} more piece${remaining > 1 ? 's' : ''}. Click a placed piece to pick it back up.`);
     }
@@ -224,7 +247,7 @@ function placeSelected(square) {
     setStatus('This puzzle only allows the highlighted squares.', true);
     return;
   }
-  if (usingExclusions() && state.puzzle.excluded.includes(square)) {
+  if (usingExclusions() && activeExclusions().includes(square)) {
     setStatus('That square is blocked — it wins too obviously. Find the hidden winning square.', true);
     return;
   }
@@ -285,6 +308,7 @@ async function play() {
 
   setStatus('Engines are playing… ♜ vs ♜');
   let lastWhiteCp = 0;
+  let slowMode = false; // slows the last few moves so the finish is readable
 
   while (!game.isGameOver()) {
     const sideToMove = game.turn();
@@ -310,9 +334,17 @@ async function play() {
     const homeRank = played.color === 'w' ? 1 : 8;
     if (played.flags.includes('k')) slides.push({ from: `h${homeRank}`, to: `f${homeRank}` });
     if (played.flags.includes('q')) slides.push({ from: `a${homeRank}`, to: `d${homeRank}` });
-    await board.animateMoves(slides, fenToMap(game.fen()));
+    // Once the engine sees a short forced mate (or the game just ended),
+    // switch to slow motion so the finish is easy to follow.
+    if (score?.type === 'mate' && Math.abs(score.value) <= 3) slowMode = true;
+    const showdown = slowMode || game.isGameOver();
+    await board.animateMoves(slides, fenToMap(game.fen()), showdown ? SLOW_ANIM_MS : MOVE_ANIM_MS);
     if (runId !== state.runId) return;
     appendMove(played, game);
+    if (showdown) {
+      await sleep(SLOW_PAUSE_MS);
+      if (runId !== state.runId) return;
+    }
     els.progress.textContent = `Move ${Math.ceil(plies / 2)}`;
   }
 

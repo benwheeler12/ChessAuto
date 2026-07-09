@@ -151,7 +151,7 @@ main {
   left: 0;
   z-index: 10;
   pointer-events: none;
-  transition: transform 220ms ease-in-out;
+  transition: transform 140ms ease-in-out;
   will-change: transform;
 }
 

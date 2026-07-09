@@ -24,19 +24,31 @@ for (const puzzle of PUZZLES) {
   if (game.turn() !== puzzle.player) fail(puzzle, 'it is not the player’s move');
   if (!puzzle.place?.length) fail(puzzle, 'no pieces to place');
 
-  const flipped = flipTurn(puzzle.fen);
-  if (validateFen(flipped).ok && new Chess(flipped).isCheck()) {
-    fail(puzzle, 'opponent starts in check');
+  // Player-to-move modes (P1/P2/classics): the opponent may not start in check.
+  if (puzzle.candidates || puzzle.excluded || !puzzle.source) {
+    const flipped = flipTurn(puzzle.fen);
+    if (validateFen(flipped).ok && new Chess(flipped).isCheck()) {
+      fail(puzzle, 'opponent starts in check');
+    }
+  }
+  // P3 flips the turn, so there the PLAYER may not start in check.
+  if (puzzle.p3 && new Chess(puzzle.fen).isCheck()) {
+    fail(puzzle, 'P3: player would start in check');
   }
 
-  if (puzzle.excluded) {
-    // Prototype 2 data: blocked squares must be sane and never the solution
+  // Prototype 2/3 data: blocked squares must be sane and never the solution
+  const exclusionSets = [];
+  if (puzzle.excluded) exclusionSets.push({ excluded: puzzle.excluded, solution: puzzle.solution, tag: 'P2' });
+  if (puzzle.p3) exclusionSets.push({ excluded: puzzle.p3.excluded, solution: puzzle.p3.solution, tag: 'P3' });
+  for (const { excluded, solution, tag } of exclusionSets) {
     const map = fenToMap(puzzle.fen);
-    if (puzzle.excluded.includes(puzzle.solution)) fail(puzzle, 'solution square is excluded');
-    if (new Set(puzzle.excluded).size !== puzzle.excluded.length) fail(puzzle, 'duplicate excluded squares');
-    for (const sq of puzzle.excluded) {
-      if (!/^[a-h][1-8]$/.test(sq)) fail(puzzle, `bad excluded square "${sq}"`);
-      else if (map[sq]) fail(puzzle, `excluded square ${sq} is occupied`);
+    if (!/^[a-h][1-8]$/.test(solution ?? '')) fail(puzzle, `${tag}: bad solution "${solution}"`);
+    else if (map[solution]) fail(puzzle, `${tag}: solution square ${solution} is occupied`);
+    if (excluded.includes(solution)) fail(puzzle, `${tag}: solution square is excluded`);
+    if (new Set(excluded).size !== excluded.length) fail(puzzle, `${tag}: duplicate excluded squares`);
+    for (const sq of excluded) {
+      if (!/^[a-h][1-8]$/.test(sq)) fail(puzzle, `${tag}: bad excluded square "${sq}"`);
+      else if (map[sq]) fail(puzzle, `${tag}: excluded square ${sq} is occupied`);
     }
   }
 
@@ -69,7 +81,7 @@ for (const puzzle of PUZZLES) {
         fail(puzzle, `placement on ${sq} gives immediate check`);
       }
     }
-  } else {
+  } else if (!puzzle.source) {
     // Hand-written free-placement puzzle
     if (game.isCheck()) fail(puzzle, 'player starts in check');
     let material = 0;
