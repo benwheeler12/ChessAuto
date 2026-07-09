@@ -5,7 +5,7 @@ import { Board, pieceClass } from './board.js';
 import { fenToMap, buildFen, flipTurn, rankOf } from './fen.js';
 
 const MOVETIME_MS = 300; // per engine move during the playout
-const DEFAULT_ANIM_MS = 140; // piece-slide duration (user-adjustable via slider)
+const DEFAULT_ANIM_MS = 50; // piece-slide duration (user-adjustable via slider)
 
 // ---- DOM ----
 const $ = (id) => document.getElementById(id);
@@ -330,10 +330,17 @@ async function play() {
   setStatus('Engines are playing… ♜ vs ♜');
   let lastWhiteCp = 0;
 
+  // The next engine starts thinking while the previous piece is still
+  // sliding, so there is no idle gap between animations.
+  const kickSearch = () => {
+    const side = game.turn();
+    const engine = side === 'w' ? whiteEngine : blackEngine;
+    return engine.search(startFen, MOVETIME_MS, uciMoves).then((r) => ({ ...r, side }));
+  };
+  let pendingSearch = kickSearch();
+
   while (!game.isGameOver()) {
-    const sideToMove = game.turn();
-    const engine = sideToMove === 'w' ? whiteEngine : blackEngine;
-    const { move, score } = await engine.search(startFen, MOVETIME_MS, uciMoves);
+    const { move, score, side } = await pendingSearch;
     if (runId !== state.runId) return; // playout was cancelled
 
     if (!move || move === '(none)') break;
@@ -344,8 +351,9 @@ async function play() {
     });
     uciMoves.push(move);
     plies++;
+    if (!game.isGameOver()) pendingSearch = kickSearch();
 
-    lastWhiteCp = scoreToWhiteCp(score, sideToMove);
+    lastWhiteCp = scoreToWhiteCp(score, side);
     setEvalBar(lastWhiteCp);
     board.clearHighlights('last-move');
     board.highlight(played.from, 'last-move');
