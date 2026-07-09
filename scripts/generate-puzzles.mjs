@@ -46,8 +46,16 @@ const ORIGIN_EVAL_LIMIT = 700; // skip positions that were already blowouts
 const FIRST_PLY = 16; // skip the opening
 const LAST_PLY_MARGIN = 6; // skip the very end of the game
 const PLY_STEP = 3;
-const PIECE_PRIORITY = ['q', 'r', 'n', 'b']; // pieces considered for removal
-const PIECE_NAMES = { q: 'queen', r: 'rook', b: 'bishop', n: 'knight', p: 'pawn' };
+// Piece-removal priority rotates per sampled position so the output mixes
+// heavy pieces with minors, pawns, and even the king (king puzzles only work
+// in opponent-moves-first mode, where the placement FENs are fully legal).
+const PIECE_VARIANTS = [
+  ['q', 'r', 'n', 'b', 'p', 'k'],
+  ['k', 'p', 'n', 'b', 'q', 'r'],
+  ['n', 'b', 'p', 'q', 'r', 'k'],
+];
+const PIECE_NAMES = { q: 'queen', r: 'rook', b: 'bishop', n: 'knight', p: 'pawn', k: 'king' };
+const MAX_P4_SOLUTIONS = 2; // prototype 4 allows at most this many winning squares
 
 const FILES = 'abcdefgh';
 const ALL_SQUARES = [];
@@ -197,7 +205,7 @@ for (const pgn of splitPgn(pgnText)) {
   }
 
   let fromThisGame = 0;
-  for (const pos of positions) {
+  for (const [posIdx, pos] of positions.entries()) {
     if (puzzles.length >= MAX_PUZZLES || fromThisGame >= PER_GAME) break;
 
     const player = pos.fen.split(' ')[1];
@@ -207,12 +215,30 @@ for (const pgn of splitPgn(pgnText)) {
     const originCp = await engine.evaluate(pos.fen, SHALLOW_MS);
     if (Math.abs(originCp) > ORIGIN_EVAL_LIMIT) continue;
 
-    // Candidate pieces to remove, strongest first.
-    const removable = Object.entries(map)
-      .filter(([, p]) => p.color === player && PIECE_PRIORITY.includes(p.type))
-      .sort(([, a], [, b]) => PIECE_PRIORITY.indexOf(a.type) - PIECE_PRIORITY.indexOf(b.type));
+    // Candidate pieces to remove: up to three of distinct type, priority
+    // rotating per position so minors/pawns/kings get their turn. Among
+    // same-type pawns prefer the most advanced one.
+    const prio = PIECE_VARIANTS[posIdx % PIECE_VARIANTS.length];
+    const sorted = Object.entries(map)
+      .filter(([, p]) => p.color === player && prio.includes(p.type))
+      .sort(([sqA, a], [sqB, b]) => {
+        const d = prio.indexOf(a.type) - prio.indexOf(b.type);
+        if (d) return d;
+        if (a.type === 'p') {
+          return player === 'w' ? Number(sqB[1]) - Number(sqA[1]) : Number(sqA[1]) - Number(sqB[1]);
+        }
+        return 0;
+      });
+    const removable = [];
+    const triedTypes = new Set();
+    for (const entry of sorted) {
+      if (triedTypes.has(entry[1].type)) continue;
+      triedTypes.add(entry[1].type);
+      removable.push(entry);
+      if (removable.length === 3) break;
+    }
 
-    for (const [origin, piece] of removable.slice(0, 2)) {
+    for (const [origin, piece] of removable) {
       if (puzzles.length >= MAX_PUZZLES || fromThisGame >= PER_GAME) break;
 
       const baseMap = { ...map };
@@ -239,28 +265,38 @@ for (const pgn of splitPgn(pgnText)) {
         const shallowWinners = scans.filter((s) => s.cp >= SHALLOW_WIN_CP).sort((a, b) => b.cp - a.cp);
         if (!shallowWinners.length || shallowWinners.length > MAX_SHALLOW_WINNERS) return null;
 
+        const deepBySq = new Map();
+        const deepEval = async (cand) => {
+          if (!deepBySq.has(cand.sq)) {
+            const deepSide = await engine.evaluate(cand.fen, DEEP_MS);
+            deepBySq.set(cand.sq, turn === player ? deepSide : -deepSide);
+          }
+          return deepBySq.get(cand.sq);
+        };
+
         let winner = null;
         for (const cand of shallowWinners.slice(0, 3)) {
-          const deepSide = await engine.evaluate(cand.fen, DEEP_MS);
-          const deep = turn === player ? deepSide : -deepSide;
+          const deep = await deepEval(cand);
           if (deep >= WIN_CP) { winner = { ...cand, cp: deep }; break; }
         }
         if (!winner) return null;
 
-        // Exclusion list: block every other square that (nearly) wins.
-        const excluded = [];
+        // Deep-verify every square shallow search liked at all.
         for (const cand of scans) {
-          if (cand.sq === winner.sq || cand.cp < EXCLUDE_VERIFY_CP) continue;
-          const deepSide = await engine.evaluate(cand.fen, DEEP_MS);
-          const deep = turn === player ? deepSide : -deepSide;
-          if (deep >= EXCLUDE_CP) excluded.push(cand.sq);
+          if (cand.cp >= EXCLUDE_VERIFY_CP) await deepEval(cand);
         }
-        excluded.sort();
-        return { scans, winner, excluded };
+        // All squares that (nearly) win — the pool prototypes 2/3 block and
+        // prototype 4 counts as "solutions".
+        const looseWins = [...deepBySq.entries()]
+          .filter(([, deep]) => deep >= EXCLUDE_CP)
+          .map(([sq]) => sq)
+          .sort();
+        const excluded = looseWins.filter((sq) => sq !== winner.sq);
+        return { scans, winner, excluded, looseWins };
       };
 
       // Player-to-move analysis (prototypes 1 & 2). The base position must
-      // be legal with the player to move.
+      // be legal with the player to move (never true for king removal).
       const opponent = player === 'w' ? 'b' : 'w';
       let own = null;
       if (isLegalStart(mapToFen(baseMap, player))) {
@@ -281,10 +317,13 @@ for (const pgn of splitPgn(pgnText)) {
         if (losers.length < 2) own = null; // without decoys we drop P1/P2 data
       }
 
-      // Opponent-to-move analysis (prototype 3): the reply comes first, so
-      // instant-capture placements no longer work.
+      // Opponent-to-move analysis (prototypes 3 & 4): the reply comes first,
+      // so instant-capture placements no longer work. King puzzles have no
+      // legal base FEN (a side without a king), but every placement FEN is
+      // fully legal, which is all these modes need.
+      const baseOppLegal = isLegalStart(mapToFen(baseMap, opponent));
       let opp = null;
-      if (isLegalStart(mapToFen(baseMap, opponent))) {
+      if (baseOppLegal || piece.type === 'k') {
         opp = await scanPlacements(opponent);
       }
 
@@ -312,19 +351,32 @@ for (const pgn of splitPgn(pgnText)) {
         puzzle.solution = own.winner.sq;
         puzzle.source.evals = { win: own.winner.cp, losses: losers.map((l) => l.cp) };
       }
-      if (opp) {
+      if (opp && baseOppLegal) {
         puzzle.p3 = { excluded: opp.excluded, solution: opp.winner.sq, winCp: opp.winner.cp };
+      }
+      // Prototype 4: no blocked squares, so the puzzle only qualifies when
+      // very few squares win at all.
+      if (opp && opp.looseWins.length <= MAX_P4_SOLUTIONS) {
+        puzzle.p4 = { solutions: opp.looseWins, winCp: opp.winner.cp };
+      }
+      if (!puzzle.candidates && !puzzle.p3 && !puzzle.p4) {
+        seen.delete(key);
+        fromThisGame--;
+        continue; // qualified for nothing after all
       }
       puzzles.push(puzzle);
       console.error(
         `  ✓ puzzle: remove ${piece.type.toUpperCase()} from ${origin} @ move ${pos.moveNumber}` +
-        (own
+        (puzzle.candidates
           ? ` — P1/P2 win ${own.winner.sq} (+${(own.winner.cp / 100).toFixed(1)}), ` +
             `losses ${losers.map((l) => `${l.sq} (${(l.cp / 100).toFixed(1)})`).join(', ')}, ` +
             `excluded [${own.excluded.join(' ')}]`
           : '') +
-        (opp
+        (puzzle.p3
           ? ` — P3 win ${opp.winner.sq} (+${(opp.winner.cp / 100).toFixed(1)}), excluded [${opp.excluded.join(' ')}]`
+          : '') +
+        (puzzle.p4
+          ? ` — P4 solutions [${puzzle.p4.solutions.join(' ')}]`
           : ''),
       );
       break; // at most one puzzle per sampled position, for variety

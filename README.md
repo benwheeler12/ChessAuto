@@ -27,6 +27,13 @@ pieces removed; put it back so your side wins the engine playout):
   place the piece the *opponent* gets the first move. Instant-capture
   placements don't work here; you have to think a move deeper. (Analysed
   separately by the generator with the opponent to move.)
+- **Prototype 4 — open board, opponent first**: like prototype 3 but nothing
+  is blocked. At most two squares on the whole board win — find one. Puzzles
+  here also feature pawns, minor pieces, and even the king, not just queens
+  and rooks.
+
+A **Move speed** slider (milliseconds per piece slide, lower = faster) sits
+under the controls for tuning the playout feel.
 
 Prototype 1 also includes the original hand-written free-placement puzzles
 (missing pieces in a tray, put them anywhere legal) as a sandbox at the end of

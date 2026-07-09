@@ -17,12 +17,25 @@ function fail(puzzle, msg) {
 }
 
 for (const puzzle of PUZZLES) {
-  const check = validateFen(puzzle.fen);
-  if (!check.ok) { fail(puzzle, `invalid FEN: ${check.error}`); continue; }
-
-  const game = new Chess(puzzle.fen);
-  if (game.turn() !== puzzle.player) fail(puzzle, 'it is not the player’s move');
   if (!puzzle.place?.length) fail(puzzle, 'no pieces to place');
+
+  // King-placement puzzles have a kingless base FEN, which chess.js can't
+  // load — validate their structure by hand, everything else normally.
+  const placesKing = puzzle.place?.includes('k');
+  let game = null;
+  if (placesKing) {
+    const map = fenToMap(puzzle.fen);
+    const kings = Object.values(map).filter((p) => p.type === 'k');
+    if (kings.length !== 1 || kings[0].color === puzzle.player) {
+      fail(puzzle, 'king puzzle must be missing exactly the player’s king');
+    }
+    if (!puzzle.p4) fail(puzzle, 'king puzzles only work in prototype 4');
+  } else {
+    const check = validateFen(puzzle.fen);
+    if (!check.ok) { fail(puzzle, `invalid FEN: ${check.error}`); continue; }
+    game = new Chess(puzzle.fen);
+    if (game.turn() !== puzzle.player) fail(puzzle, 'it is not the player’s move');
+  }
 
   // Player-to-move modes (P1/P2/classics): the opponent may not start in check.
   if (puzzle.candidates || puzzle.excluded || !puzzle.source) {
@@ -34,6 +47,29 @@ for (const puzzle of PUZZLES) {
   // P3 flips the turn, so there the PLAYER may not start in check.
   if (puzzle.p3 && new Chess(puzzle.fen).isCheck()) {
     fail(puzzle, 'P3: player would start in check');
+  }
+
+  // Prototype 4 data: 1-2 winning squares, all empty, opponent to move first.
+  if (puzzle.p4) {
+    const map = fenToMap(puzzle.fen);
+    const { solutions } = puzzle.p4;
+    if (!solutions?.length || solutions.length > 2) {
+      fail(puzzle, `P4: ${solutions?.length ?? 0} solutions (want 1-2)`);
+    }
+    if (new Set(solutions).size !== solutions.length) fail(puzzle, 'P4: duplicate solutions');
+    const opponent = puzzle.player === 'w' ? 'b' : 'w';
+    for (const sq of solutions ?? []) {
+      if (!/^[a-h][1-8]$/.test(sq)) { fail(puzzle, `P4: bad solution square "${sq}"`); continue; }
+      if (map[sq]) { fail(puzzle, `P4: solution square ${sq} is occupied`); continue; }
+      const placedFen = buildFen(
+        { ...map, [sq]: { type: puzzle.place[0], color: puzzle.player } },
+        opponent,
+      );
+      if (!validateFen(placedFen).ok) fail(puzzle, `P4: placement on ${sq} is not a legal position`);
+      else if (new Chess(flipTurn(placedFen)).isCheck()) {
+        fail(puzzle, `P4: placement on ${sq} leaves the player in check`);
+      }
+    }
   }
 
   // Prototype 2/3 data: blocked squares must be sane and never the solution
