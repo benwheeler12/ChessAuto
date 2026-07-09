@@ -141,7 +141,13 @@ for (const puzzle of PUZZLES) {
     const winners = mode === 'own'
       ? [puzzle.solution].filter(Boolean)
       : puzzle.p4 ? puzzle.p4.solutions : [puzzle.p3?.solution].filter(Boolean);
+    // Squares the player can actually reach in this mode; lines for blocked
+    // squares (e.g. added to exclusions by self-healing) are inert.
+    const blocked = mode === 'own'
+      ? puzzle.excluded ?? []
+      : puzzle.p4 ? [] : puzzle.p3?.excluded ?? [];
     for (const [sq, line] of Object.entries(bySquare)) {
+      if (blocked.includes(sq)) continue;
       lineCount++;
       const map = fenToMap(puzzle.fen);
       map[sq] = { type: puzzle.place[0], color: puzzle.player };
