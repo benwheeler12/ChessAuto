@@ -154,6 +154,28 @@ main {
   will-change: transform;
 }
 
+/* Verdict reveal when the playout starts */
+@keyframes flash-win {
+  0% { box-shadow: inset 0 0 0 999px rgba(149, 187, 74, 0); }
+  25% { box-shadow: inset 0 0 0 999px rgba(149, 187, 74, 0.8); }
+  100% { box-shadow: inset 0 0 0 999px rgba(149, 187, 74, 0); }
+}
+.square.reveal-win { animation: flash-win 900ms ease-out; }
+@keyframes flash-loss {
+  0% { box-shadow: inset 0 0 0 999px rgba(192, 86, 78, 0); }
+  25% { box-shadow: inset 0 0 0 999px rgba(192, 86, 78, 0.85); }
+  100% { box-shadow: inset 0 0 0 999px rgba(192, 86, 78, 0); }
+}
+.square.reveal-loss { animation: flash-loss 900ms ease-out; }
+.confetti {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 1.5px;
+  z-index: 20;
+  pointer-events: none;
+}
+
 /* A freshly placed piece dropping onto its square */
 .piece.drop-in { animation: drop-in 180ms ease-out; }
 @keyframes drop-in {
