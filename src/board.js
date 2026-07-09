@@ -94,11 +94,16 @@ export class Board {
    * Slide pieces from their squares to their destinations, then apply the
    * final position. `moves` may hold several movements (castling moves two
    * pieces at once); captured pieces stay visible until the slide completes.
+   *
+   * Uses the Web Animations API rather than CSS transitions: transitions can
+   * skip their starting frame at very short durations (pieces appear to
+   * teleport below ~100ms), while element.animate() is frame-accurate.
    * @param {{from: string, to: string}[]} moves
    * @param {Record<string, {type: string, color: string}>} newPosition
    */
-  animateMoves(moves, newPosition, duration = 140) {
+  animateMoves(moves, newPosition, duration = 50) {
     const boardRect = this.el.getBoundingClientRect();
+    const animations = [];
     const floats = [];
     for (const { from, to } of moves) {
       const fromCell = this.squares.get(from);
@@ -111,26 +116,26 @@ export class Board {
       float.classList.add('floating');
       float.style.width = `${f.width}px`;
       float.style.height = `${f.height}px`;
-      float.style.transitionDuration = `${duration}ms`;
-      float.style.transform = `translate(${f.left - boardRect.left}px, ${f.top - boardRect.top}px)`;
+      const start = `translate(${f.left - boardRect.left}px, ${f.top - boardRect.top}px)`;
+      const end = `translate(${t.left - boardRect.left}px, ${t.top - boardRect.top}px)`;
+      float.style.transform = start;
       pieceEl.remove();
       this.el.appendChild(float);
-      floats.push({ float, x: t.left - boardRect.left, y: t.top - boardRect.top });
+      floats.push(float);
+      animations.push(
+        float.animate(
+          [{ transform: start }, { transform: end }],
+          { duration, easing: 'ease-out', fill: 'forwards' },
+        ).finished.catch(() => {}),
+      );
     }
     if (!floats.length) {
       this.setPosition(newPosition);
       return Promise.resolve();
     }
-    void this.el.offsetWidth; // commit starting transforms before transitioning
-    for (const { float, x, y } of floats) {
-      float.style.transform = `translate(${x}px, ${y}px)`;
-    }
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        for (const { float } of floats) float.remove();
-        this.setPosition(newPosition);
-        resolve();
-      }, duration + 30);
+    return Promise.all(animations).then(() => {
+      this.setPosition(newPosition);
+      for (const float of floats) float.remove();
     });
   }
 
