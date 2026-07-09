@@ -5,11 +5,7 @@ import { Board, pieceClass } from './board.js';
 import { fenToMap, buildFen, flipTurn, rankOf } from './fen.js';
 
 const MOVETIME_MS = 300; // per engine move during the playout
-const MOVE_ANIM_MS = 140; // normal piece-slide duration
-const SLOW_ANIM_MS = 500; // slide duration once the finish is near
-const SLOW_PAUSE_MS = 450; // extra pause between the final moves
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const DEFAULT_ANIM_MS = 140; // piece-slide duration (user-adjustable via slider)
 
 // ---- DOM ----
 const $ = (id) => document.getElementById(id);
@@ -31,7 +27,14 @@ const els = {
   retryBtn: $('retry-btn'),
   progress: $('progress'),
   movelist: $('movelist'),
+  speedSlider: $('speed-slider'),
+  speedValue: $('speed-value'),
 };
+
+/** Piece-slide duration in ms, from the user-adjustable slider. */
+function moveAnimMs() {
+  return Number(els.speedSlider.value) || DEFAULT_ANIM_MS;
+}
 
 // ---- State ----
 const state = {
@@ -51,11 +54,14 @@ const state = {
 //       blocked; exactly one of the remaining squares wins
 //   3 — like 2, but the OPPONENT moves first after placement, so instant
 //       captures don't work (analysed separately by the generator)
+//   4 — like 3, but nothing is blocked: place anywhere; at most two squares
+//       on the whole board win, and the piece may be a pawn, minor, or king
 let activePuzzles = [];
 
 function puzzlesForProto(proto) {
   if (proto === 2) return PUZZLES.filter((p) => p.excluded);
   if (proto === 3) return PUZZLES.filter((p) => p.p3);
+  if (proto === 4) return PUZZLES.filter((p) => p.p4);
   return PUZZLES.filter((p) => p.candidates || !p.source);
 }
 
@@ -73,13 +79,20 @@ function usingExclusions() {
 function activeExclusions() {
   if (state.proto === 2 && state.puzzle.excluded) return state.puzzle.excluded;
   if (state.proto === 3 && state.puzzle.p3) return state.puzzle.p3.excluded;
-  return null;
+  return null; // prototype 4 blocks nothing
 }
 
-/** Prototype 3 flips the side to move: the opponent replies first. */
+/** Prototype 4: open placement, opponent first, nothing blocked. */
+function usingP4() {
+  return state.proto === 4 && Boolean(state.puzzle.p4);
+}
+
+/** Prototypes 3 and 4 flip the side to move: the opponent replies first. */
 function currentTurn() {
   const baseTurn = state.puzzle.fen.split(' ')[1];
-  if (state.proto === 3 && state.puzzle.p3) return baseTurn === 'w' ? 'b' : 'w';
+  if ((state.proto === 3 && state.puzzle.p3) || usingP4()) {
+    return baseTurn === 'w' ? 'b' : 'w';
+  }
   return baseTurn;
 }
 
@@ -137,7 +150,11 @@ function validatePosition() {
   // The opponent (side not to move) may not start the game in check.
   const flipped = new Chess(flipTurn(fen));
   if (flipped.isCheck()) {
-    return 'You can’t place a piece that gives immediate check — the engines need a legal starting position.';
+    // With the opponent to move (prototypes 3/4) this means the PLAYER would
+    // start in check — only possible when placing the king badly.
+    return currentTurn() === state.puzzle.player
+      ? 'You can’t place a piece that gives immediate check — the engines need a legal starting position.'
+      : 'Your king can’t be placed into check — pick a safer square.';
   }
   if (game.isGameOver()) return 'That position is already over before a move is played.';
   return null;
@@ -152,7 +169,7 @@ function refreshSetup() {
   const remaining = state.tray.filter((t) => !t.square).length;
 
   // Single-piece GM puzzles: auto-select the piece so one click places it.
-  if ((usingCandidates() || usingExclusions()) && remaining > 0 && state.selectedTray === -1) {
+  if ((usingCandidates() || usingExclusions() || usingP4()) && remaining > 0 && state.selectedTray === -1) {
     state.selectedTray = state.tray.findIndex((t) => !t.square);
     board.setPlacing(true);
     renderTray();
@@ -186,11 +203,13 @@ function refreshSetup() {
       setStatus(`Place your ${pieceName(state.tray[0].type)} on one of the ${state.puzzle.candidates.length} highlighted squares. Exactly one of them wins.`);
     } else if (usingExclusions()) {
       setStatus(`Place your ${pieceName(state.tray[0].type)} anywhere except the ✕ squares — those win too obviously. Exactly one legal square wins.${state.proto === 3 ? ' Careful: your opponent moves first!' : ''}`);
+    } else if (usingP4()) {
+      setStatus(`Place your ${pieceName(state.tray[0].type)} anywhere. At most two squares on the whole board win — and your opponent moves first!`);
     } else {
       setStatus(`Place ${remaining} more piece${remaining > 1 ? 's' : ''}. Click a placed piece to pick it back up.`);
     }
   } else {
-    setStatus(usingCandidates() || usingExclusions()
+    setStatus(usingCandidates() || usingExclusions() || usingP4()
       ? 'Piece placed — press “Play it out”, or click it to try a different square.'
       : 'Position set! Press “Play it out” and the engines will battle it out.');
   }
@@ -308,7 +327,6 @@ async function play() {
 
   setStatus('Engines are playing… ♜ vs ♜');
   let lastWhiteCp = 0;
-  let slowMode = false; // slows the last few moves so the finish is readable
 
   while (!game.isGameOver()) {
     const sideToMove = game.turn();
@@ -334,17 +352,9 @@ async function play() {
     const homeRank = played.color === 'w' ? 1 : 8;
     if (played.flags.includes('k')) slides.push({ from: `h${homeRank}`, to: `f${homeRank}` });
     if (played.flags.includes('q')) slides.push({ from: `a${homeRank}`, to: `d${homeRank}` });
-    // Once the engine sees a short forced mate (or the game just ended),
-    // switch to slow motion so the finish is easy to follow.
-    if (score?.type === 'mate' && Math.abs(score.value) <= 3) slowMode = true;
-    const showdown = slowMode || game.isGameOver();
-    await board.animateMoves(slides, fenToMap(game.fen()), showdown ? SLOW_ANIM_MS : MOVE_ANIM_MS);
+    await board.animateMoves(slides, fenToMap(game.fen()), moveAnimMs());
     if (runId !== state.runId) return;
     appendMove(played, game);
-    if (showdown) {
-      await sleep(SLOW_PAUSE_MS);
-      if (runId !== state.runId) return;
-    }
     els.progress.textContent = `Move ${Math.ceil(plies / 2)}`;
   }
 
@@ -417,11 +427,10 @@ function drawReason(game) {
 }
 
 function stopPlayout() {
-  state.runId++;
   whiteEngine.stop();
   blackEngine.stop();
-  backToSetup();
-  setStatus('Playout stopped. Adjust your pieces and try again.');
+  resetPlacements(); // stopping also resets the board in one press
+  setStatus('Playout stopped and board reset. Place your pieces and try again.');
 }
 
 function backToSetup() {
@@ -472,6 +481,12 @@ function setPrototype(proto) {
 for (const btn of document.querySelectorAll('#proto-switch button')) {
   btn.addEventListener('click', () => setPrototype(Number(btn.dataset.proto)));
 }
+els.speedSlider.value = localStorage.getItem('chessauto-speed') || String(DEFAULT_ANIM_MS);
+els.speedValue.textContent = `${els.speedSlider.value} ms`;
+els.speedSlider.addEventListener('input', () => {
+  els.speedValue.textContent = `${els.speedSlider.value} ms`;
+  localStorage.setItem('chessauto-speed', els.speedSlider.value);
+});
 els.puzzleSelect.addEventListener('change', () => loadPuzzle(Number(els.puzzleSelect.value)));
 els.prevPuzzle.addEventListener('click', () => {
   loadPuzzle((Number(els.puzzleSelect.value) + activePuzzles.length - 1) % activePuzzles.length);
