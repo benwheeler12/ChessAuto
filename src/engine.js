@@ -54,13 +54,18 @@ export class Engine {
   }
 
   /**
-   * Search the position and return the best move plus the engine's score
-   * (from the side-to-move's perspective).
+   * Search a position and return the best move plus the engine's score
+   * (from the side-to-move's perspective). Pass the moves played since
+   * `fen` so the engine knows the game history — without it, it cannot
+   * see (and avoid) threefold repetitions.
+   * @param {string} fen starting position
+   * @param {number} movetimeMs
+   * @param {string[]} [moves] UCI moves played from `fen` to the current position
    * @returns {Promise<{move: string, score: {type: 'cp'|'mate', value: number}|null}>}
    */
-  async search(fen, movetimeMs) {
+  async search(fen, movetimeMs, moves = []) {
     let score = null;
-    this.send(`position fen ${fen}`);
+    this.send(`position fen ${fen}${moves.length ? ` moves ${moves.join(' ')}` : ''}`);
     const done = this.waitFor(
       (l) => l.startsWith('bestmove'),
       (l) => {

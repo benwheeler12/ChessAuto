@@ -319,7 +319,9 @@ async function play() {
   els.progress.classList.remove('hidden');
   board.clearHighlights('hint', 'bad', 'selected', 'option', 'excluded');
 
-  const game = new Chess(currentFen());
+  const startFen = currentFen();
+  const game = new Chess(startFen);
+  const uciMoves = []; // full history so the engines can see repetitions
   let plies = 0;
 
   await Promise.all([whiteEngine.newGame(), blackEngine.newGame()]);
@@ -331,7 +333,7 @@ async function play() {
   while (!game.isGameOver()) {
     const sideToMove = game.turn();
     const engine = sideToMove === 'w' ? whiteEngine : blackEngine;
-    const { move, score } = await engine.search(game.fen(), MOVETIME_MS);
+    const { move, score } = await engine.search(startFen, MOVETIME_MS, uciMoves);
     if (runId !== state.runId) return; // playout was cancelled
 
     if (!move || move === '(none)') break;
@@ -340,6 +342,7 @@ async function play() {
       to: move.slice(2, 4),
       promotion: move[4],
     });
+    uciMoves.push(move);
     plies++;
 
     lastWhiteCp = scoreToWhiteCp(score, sideToMove);
