@@ -16,7 +16,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "node scripts/validate-puzzles.mjs",
-    "generate": "node scripts/generate-puzzles.mjs"
+    "generate": "node scripts/generate-puzzles.mjs",
+    "generate:lines": "node scripts/generate-lines.mjs"
   },
   "dependencies": {
     "chess.js": "^1.4.0",

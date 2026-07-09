@@ -99,6 +99,16 @@ Point it at any PGN collection with
 (ms per verification eval). The bundled `data/games.pgn` holds famous
 public-domain games (Morphy, Anderssen, Fischer, Rubinstein, Kasparov…).
 
+After generating puzzles, `npm run generate:lines` precomputes a full
+engine-vs-engine playout line (moves + evals) for **every square the player
+can choose** in every mode, using parallel worker processes. Each line is
+retried at increasing think times until its terminal result agrees with the
+square's verdict, and stubborn disagreements are self-healed in the puzzle
+data. With lines shipped, the playout is pure playback — no Stockfish runs at
+runtime for generated puzzles (the engines still load in the background for
+the free-placement classics), the pace is fully controlled by the speed
+slider, and results are deterministic.
+
 ## Credits
 
 Piece graphics are the classic

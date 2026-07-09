@@ -103,6 +103,19 @@ function currentTurn() {
   return baseTurn;
 }
 
+/**
+ * The precomputed playout line for the current placement, if the generator
+ * shipped one ({ m: 'uci uci …', e: 'cp cp …' }). With a line in hand the
+ * playout needs no engine at all.
+ */
+function lineForPlacement() {
+  if (state.tray.length !== 1) return null;
+  const sq = state.tray[0].square;
+  if (!sq || !state.puzzle.lines) return null;
+  const key = currentTurn() === state.puzzle.player ? 'own' : 'opp';
+  return state.puzzle.lines[key]?.[sq] ?? null;
+}
+
 const whiteEngine = new Engine('white');
 const blackEngine = new Engine('black');
 
@@ -193,7 +206,9 @@ function refreshSetup() {
   let error = null;
   if (remaining === 0) error = validatePosition();
 
-  els.playBtn.disabled = !(state.enginesReady && remaining === 0 && !error);
+  // Puzzles with precomputed lines don't need the engines at all.
+  const canRun = state.enginesReady || Boolean(lineForPlacement());
+  els.playBtn.disabled = !(canRun && remaining === 0 && !error);
   els.playBtn.classList.remove('hidden');
   els.stopBtn.classList.add('hidden');
   els.retryBtn.classList.add('hidden');
@@ -201,7 +216,7 @@ function refreshSetup() {
   els.trayLabel.classList.remove('hidden');
   els.tray.classList.remove('hidden');
 
-  if (!state.enginesReady) {
+  if (!state.enginesReady && !state.puzzle.lines) {
     setStatus('Loading engines… you can start placing pieces meanwhile.');
   } else if (error) {
     setStatus(error, true);
@@ -331,38 +346,71 @@ async function play() {
   const uciMoves = []; // full history so the engines can see repetitions
   let plies = 0;
 
-  await Promise.all([whiteEngine.newGame(), blackEngine.newGame()]);
-  if (runId !== state.runId) return;
-
-  // Producer: the engines fill a move buffer as fast as they can think —
-  // starting during the reveal animation, so the display never starts dry.
   const queue = [];
   let producerDone = false;
-  (async () => {
+
+  // Preferred path: a precomputed line ships with the puzzle, so the whole
+  // game is known instantly and no engine runs at all.
+  let line = lineForPlacement();
+  if (line) {
     try {
-      while (!game.isGameOver()) {
-        const side = game.turn();
-        const engine = side === 'w' ? whiteEngine : blackEngine;
-        const { move, score } = await engine.search(startFen, MOVETIME_MS, uciMoves);
-        if (runId !== state.runId) return;
-        if (!move || move === '(none)') break;
+      const moves = line.m.split(' ');
+      const evals = line.e.split(' ').map(Number);
+      for (let i = 0; i < moves.length; i++) {
+        const uci = moves[i];
         const played = game.move({
-          from: move.slice(0, 2),
-          to: move.slice(2, 4),
-          promotion: move[4],
+          from: uci.slice(0, 2),
+          to: uci.slice(2, 4),
+          promotion: uci[4],
         });
-        uciMoves.push(move);
         queue.push({
           played,
           fen: game.fen(),
           moveNo: Number(game.fen().split(' ')[5]),
-          whiteCp: scoreToWhiteCp(score, side),
+          whiteCp: evals[i] ?? 0,
         });
       }
-    } finally {
       producerDone = true;
+    } catch (err) {
+      console.warn('Stored line failed to replay; falling back to live engines.', err);
+      line = null;
+      queue.length = 0;
+      game.load(startFen);
     }
-  })();
+  }
+
+  if (!line) {
+    // Live path: the engines fill the move buffer as fast as they can
+    // think — starting during the reveal, so the display never starts dry.
+    await Promise.all([whiteEngine.init(), blackEngine.init()]);
+    await Promise.all([whiteEngine.newGame(), blackEngine.newGame()]);
+    if (runId !== state.runId) return;
+    (async () => {
+      try {
+        while (!game.isGameOver()) {
+          const side = game.turn();
+          const engine = side === 'w' ? whiteEngine : blackEngine;
+          const { move, score } = await engine.search(startFen, MOVETIME_MS, uciMoves);
+          if (runId !== state.runId) return;
+          if (!move || move === '(none)') break;
+          const played = game.move({
+            from: move.slice(0, 2),
+            to: move.slice(2, 4),
+            promotion: move[4],
+          });
+          uciMoves.push(move);
+          queue.push({
+            played,
+            fen: game.fen(),
+            moveNo: Number(game.fen().split(' ')[5]),
+            whiteCp: scoreToWhiteCp(score, side),
+          });
+        }
+      } finally {
+        producerDone = true;
+      }
+    })();
+  }
 
   // Verdict reveal (~1s) while the buffer fills.
   await playReveal();
