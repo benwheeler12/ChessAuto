@@ -7,6 +7,13 @@ import { fenToMap, buildFen, flipTurn, rankOf } from './fen.js';
 const MOVETIME_MS = 300; // per engine move during the playout
 const DEFAULT_ANIM_MS = 50; // piece-slide duration (user-adjustable via slider)
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Minimum time between displayed moves: the slide plus an equal rest. */
+function movePaceMs() {
+  return Math.max(moveAnimMs() * 2, 90);
+}
+
 // ---- DOM ----
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -327,34 +334,56 @@ async function play() {
   await Promise.all([whiteEngine.newGame(), blackEngine.newGame()]);
   if (runId !== state.runId) return;
 
+  // Producer: the engines fill a move buffer as fast as they can think —
+  // starting during the reveal animation, so the display never starts dry.
+  const queue = [];
+  let producerDone = false;
+  (async () => {
+    try {
+      while (!game.isGameOver()) {
+        const side = game.turn();
+        const engine = side === 'w' ? whiteEngine : blackEngine;
+        const { move, score } = await engine.search(startFen, MOVETIME_MS, uciMoves);
+        if (runId !== state.runId) return;
+        if (!move || move === '(none)') break;
+        const played = game.move({
+          from: move.slice(0, 2),
+          to: move.slice(2, 4),
+          promotion: move[4],
+        });
+        uciMoves.push(move);
+        queue.push({
+          played,
+          fen: game.fen(),
+          moveNo: Number(game.fen().split(' ')[5]),
+          whiteCp: scoreToWhiteCp(score, side),
+        });
+      }
+    } finally {
+      producerDone = true;
+    }
+  })();
+
+  // Verdict reveal (~1s) while the buffer fills.
+  await playReveal();
+  if (runId !== state.runId) return;
   setStatus('Engines are playing… ♜ vs ♜');
-  let lastWhiteCp = 0;
 
-  // The next engine starts thinking while the previous piece is still
-  // sliding, so there is no idle gap between animations.
-  const kickSearch = () => {
-    const side = game.turn();
-    const engine = side === 'w' ? whiteEngine : blackEngine;
-    return engine.search(startFen, MOVETIME_MS, uciMoves).then((r) => ({ ...r, side }));
-  };
-  let pendingSearch = kickSearch();
-
-  while (!game.isGameOver()) {
-    const { move, score, side } = await pendingSearch;
-    if (runId !== state.runId) return; // playout was cancelled
-
-    if (!move || move === '(none)') break;
-    const played = game.move({
-      from: move.slice(0, 2),
-      to: move.slice(2, 4),
-      promotion: move[4],
-    });
-    uciMoves.push(move);
+  // Consumer: drain the buffer at the user's pace, independent of how fast
+  // the engines happen to be thinking.
+  while (true) {
+    if (!queue.length) {
+      if (producerDone) break;
+      await sleep(25);
+      if (runId !== state.runId) return;
+      continue;
+    }
+    const item = queue.shift();
+    const stepStart = performance.now();
+    const { played } = item;
     plies++;
-    if (!game.isGameOver()) pendingSearch = kickSearch();
 
-    lastWhiteCp = scoreToWhiteCp(score, side);
-    setEvalBar(lastWhiteCp);
+    setEvalBar(item.whiteCp);
     board.clearHighlights('last-move');
     board.highlight(played.from, 'last-move');
     board.highlight(played.to, 'last-move');
@@ -363,18 +392,58 @@ async function play() {
     const homeRank = played.color === 'w' ? 1 : 8;
     if (played.flags.includes('k')) slides.push({ from: `h${homeRank}`, to: `f${homeRank}` });
     if (played.flags.includes('q')) slides.push({ from: `a${homeRank}`, to: `d${homeRank}` });
-    await board.animateMoves(slides, fenToMap(game.fen()), moveAnimMs());
+    await board.animateMoves(slides, fenToMap(item.fen), moveAnimMs());
     if (runId !== state.runId) return;
-    appendMove(played, game);
+    appendMove(played, item.moveNo);
     els.progress.textContent = `Move ${Math.ceil(plies / 2)}`;
+
+    const rest = movePaceMs() - (performance.now() - stepStart);
+    if (rest > 0) {
+      await sleep(rest);
+      if (runId !== state.runId) return;
+    }
   }
 
   if (runId !== state.runId) return;
   finish(game);
 }
 
-function appendMove(played, game) {
-  const moveNo = played.color === 'w' ? game.moveNumber() : game.moveNumber() - 1;
+/**
+ * Which way is this placement going to go? Known ahead of time for generated
+ * puzzles (the engines verified every square); unknown for the classics.
+ * @returns {'win'|'loss'|null}
+ */
+function knownVerdict() {
+  const placed = state.tray.find((t) => t.square)?.square;
+  if (!placed) return null;
+  const p = state.puzzle;
+  if (usingCandidates()) return placed === p.solution ? 'win' : 'loss';
+  if (state.proto === 2 && p.excluded) return placed === p.solution ? 'win' : 'loss';
+  if (state.proto === 3 && p.p3) return placed === p.p3.solution ? 'win' : 'loss';
+  if (usingP4()) return p.p4.solutions.includes(placed) ? 'win' : 'loss';
+  return null;
+}
+
+/** The ~1s win/loss reveal on the placed piece; doubles as buffer-fill time. */
+async function playReveal() {
+  const placed = state.tray.find((t) => t.square)?.square;
+  const verdict = knownVerdict();
+  if (verdict === 'win' && placed) {
+    setStatus('Direct hit! Now watch it play out…');
+    await board.revealWin(placed);
+  } else if (verdict === 'loss' && placed) {
+    setStatus('That square doesn’t win… watch what happens.', true);
+    await board.revealLoss(placed);
+  } else {
+    // Classics: no verdict data — a short pause still primes the buffer.
+    await sleep(600);
+  }
+}
+
+function appendMove(played, fenMoveNo) {
+  // The fullmove counter increments after Black's move, so the FEN taken
+  // after the move reads N for White's move and N+1 for Black's.
+  const moveNo = played.color === 'w' ? fenMoveNo : fenMoveNo - 1;
   const last = els.movelist.lastElementChild;
   if (played.color === 'b' && last && Number(last.value) === moveNo && !last.dataset.complete) {
     // Black's reply joins White's move on the same row.

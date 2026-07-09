@@ -139,6 +139,77 @@ export class Board {
     });
   }
 
+  /**
+   * Victory reveal on the placed piece: green flash, a scale pulse, and a
+   * little confetti burst. Resolves when the show is over (~1s).
+   */
+  revealWin(square) {
+    const cell = this.squares.get(square);
+    if (!cell) return Promise.resolve();
+    const anims = [];
+    cell.classList.add('reveal-win');
+    const piece = cell.querySelector('.piece');
+    if (piece) {
+      anims.push(piece.animate(
+        [
+          { transform: 'scale(1)' },
+          { transform: 'scale(1.3)', offset: 0.3 },
+          { transform: 'scale(1)' },
+        ],
+        { duration: 650, easing: 'ease-out' },
+      ).finished.catch(() => {}));
+    }
+    const boardRect = this.el.getBoundingClientRect();
+    const rect = cell.getBoundingClientRect();
+    const cx = rect.left - boardRect.left + rect.width / 2;
+    const cy = rect.top - boardRect.top + rect.height / 2;
+    const colors = ['#95bb4a', '#ffd24d', '#7fa650', '#ffffff'];
+    for (let i = 0; i < 18; i++) {
+      const bit = document.createElement('div');
+      bit.className = 'confetti';
+      bit.style.background = colors[i % colors.length];
+      bit.style.left = `${cx}px`;
+      bit.style.top = `${cy}px`;
+      this.el.appendChild(bit);
+      const angle = (i / 18) * Math.PI * 2 + Math.random() * 0.5;
+      const dist = 34 + Math.random() * 55;
+      const dx = Math.cos(angle) * dist;
+      const dy = Math.sin(angle) * dist - 30; // launch upward-ish, then fall
+      anims.push(bit.animate(
+        [
+          { transform: 'translate(-50%, -50%) rotate(0deg)', opacity: 1 },
+          { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy + 55}px)) rotate(${200 + Math.random() * 340}deg)`, opacity: 0 },
+        ],
+        { duration: 800 + Math.random() * 250, easing: 'cubic-bezier(0.2, 0.6, 0.4, 1)' },
+      ).finished.catch(() => {}).then(() => bit.remove()));
+    }
+    return Promise.all(anims).then(() => cell.classList.remove('reveal-win'));
+  }
+
+  /**
+   * Defeat reveal: the placed piece's square flashes red and the whole board
+   * shakes its head. Resolves when the show is over (~0.9s).
+   */
+  revealLoss(square) {
+    const cell = this.squares.get(square);
+    if (!cell) return Promise.resolve();
+    cell.classList.add('reveal-loss');
+    const shake = this.el.animate(
+      [
+        { transform: 'translateX(0)' },
+        { transform: 'translateX(-10px)' },
+        { transform: 'translateX(9px)' },
+        { transform: 'translateX(-7px)' },
+        { transform: 'translateX(5px)' },
+        { transform: 'translateX(-3px)' },
+        { transform: 'translateX(0)' },
+      ],
+      { duration: 500, easing: 'ease-out' },
+    ).finished.catch(() => {});
+    const hold = new Promise((resolve) => setTimeout(resolve, 900));
+    return Promise.all([shake, hold]).then(() => cell.classList.remove('reveal-loss'));
+  }
+
   /** Play a quick drop-in animation on the piece at `square` (used when placing). */
   dropIn(square) {
     const piece = this.squares.get(square)?.querySelector('.piece');
