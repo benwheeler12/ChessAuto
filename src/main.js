@@ -533,8 +533,19 @@ function finish(game) {
   state.phase = 'done';
   els.banner.className = `banner ${win ? 'win' : 'loss'}`;
   els.banner.innerHTML = '';
+  els.banner.appendChild(win ? buildConfettiRain() : buildWaves());
   const h2 = document.createElement('h2');
-  h2.textContent = title;
+  // Letters animate in one by one.
+  let i = 0;
+  for (const ch of title) {
+    const span = document.createElement('span');
+    span.className = 'ltr';
+    span.textContent = ch;
+    if (ch === ' ') span.style.whiteSpace = 'pre';
+    span.style.animationDelay = `${i * 40}ms`;
+    h2.appendChild(span);
+    i++;
+  }
   const p = document.createElement('p');
   p.textContent = detail;
   els.banner.append(h2, p);
@@ -545,6 +556,38 @@ function finish(game) {
   setStatus(win
     ? 'You built a winning position. Try the next puzzle!'
     : 'Adjust your piece placement and try again.', !win);
+}
+
+/** Gentle confetti rain over the whole board for the win banner. */
+function buildConfettiRain() {
+  const wrap = document.createElement('div');
+  wrap.className = 'confetti-rain';
+  const colors = ['#95bb4a', '#ffd24d', '#7fa650', '#ffffff', '#e8a33d'];
+  for (let i = 0; i < 55; i++) {
+    const bit = document.createElement('span');
+    const size = 5 + Math.random() * 5;
+    bit.style.left = `${Math.random() * 100}%`;
+    bit.style.background = colors[i % colors.length];
+    bit.style.width = `${size}px`;
+    bit.style.height = `${size * (0.6 + Math.random() * 0.8)}px`;
+    bit.style.opacity = String(0.55 + Math.random() * 0.45);
+    bit.style.animationDuration = `${2.8 + Math.random() * 2.6}s`;
+    bit.style.animationDelay = `${Math.random() * 3}s`;
+    wrap.appendChild(bit);
+  }
+  return wrap;
+}
+
+/** Layered dark-red waves rolling along the bottom of the loss banner. */
+function buildWaves() {
+  const wrap = document.createElement('div');
+  wrap.className = 'banner-waves';
+  for (const cls of ['w1', 'w2', 'w3']) {
+    const wave = document.createElement('div');
+    wave.className = `wave ${cls}`;
+    wrap.appendChild(wave);
+  }
+  return wrap;
 }
 
 function drawReason(game) {
