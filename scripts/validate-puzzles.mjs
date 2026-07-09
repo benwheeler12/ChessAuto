@@ -29,6 +29,17 @@ for (const puzzle of PUZZLES) {
     fail(puzzle, 'opponent starts in check');
   }
 
+  if (puzzle.excluded) {
+    // Prototype 2 data: blocked squares must be sane and never the solution
+    const map = fenToMap(puzzle.fen);
+    if (puzzle.excluded.includes(puzzle.solution)) fail(puzzle, 'solution square is excluded');
+    if (new Set(puzzle.excluded).size !== puzzle.excluded.length) fail(puzzle, 'duplicate excluded squares');
+    for (const sq of puzzle.excluded) {
+      if (!/^[a-h][1-8]$/.test(sq)) fail(puzzle, `bad excluded square "${sq}"`);
+      else if (map[sq]) fail(puzzle, `excluded square ${sq} is occupied`);
+    }
+  }
+
   if (puzzle.candidates) {
     // Generated candidate-constrained puzzle
     if (puzzle.place.length !== 1) fail(puzzle, 'candidate puzzles must place exactly one piece');

@@ -36,6 +36,11 @@ const WIN_CP = 300; // "completely winning" for the player
 const LOSS_CP = -300; // "clearly losing" for the player
 const SHALLOW_WIN_CP = 350; // pre-filter margins (shallow search is noisy)
 const SHALLOW_LOSS_CP = -250;
+// Prototype 2 (open placement): squares whose shallow eval is at least
+// EXCLUDE_VERIFY_CP get a deep look, and anything confirmed >= EXCLUDE_CP is
+// blocked so that only the chosen solution square wins.
+const EXCLUDE_VERIFY_CP = 50;
+const EXCLUDE_CP = 150;
 const MAX_SHALLOW_WINNERS = 6; // more than this = placement isn't precise/sharp
 const ORIGIN_EVAL_LIMIT = 700; // skip positions that were already blowouts
 const FIRST_PLY = 16; // skip the opening
@@ -252,6 +257,17 @@ for (const pgn of splitPgn(pgnText)) {
       }
       if (losers.length < 2) continue;
 
+      // Prototype 2 exclusion list: deep-verify every square that shallow
+      // search liked, and block the ones that (nearly) win — except the
+      // solution, which stays hidden among the ordinary squares.
+      const excluded = [];
+      for (const cand of scans) {
+        if (cand.sq === winner.sq || cand.cp < EXCLUDE_VERIFY_CP) continue;
+        const deep = await engine.evaluate(cand.fen, DEEP_MS);
+        if (deep >= EXCLUDE_CP) excluded.push(cand.sq);
+      }
+      excluded.sort();
+
       const candidates = [winner.sq, ...losers.map((l) => l.sq)].sort();
       const lastName = (s) => (s ?? '?').split(',')[0].trim();
       seen.add(key);
@@ -259,14 +275,12 @@ for (const pgn of splitPgn(pgnText)) {
       puzzles.push({
         id: `gm-${puzzles.length + 1}`,
         name: `${lastName(header.White)}–${lastName(header.Black)}, ${(header.Date ?? '').slice(0, 4)}`,
-        description:
-          `From ${label}, around move ${pos.moveNumber}. ` +
-          `Place the ${PIECE_NAMES[piece.type]} on one of the highlighted squares — ` +
-          `one of them wins, the rest lose.`,
+        description: `From ${label}, around move ${pos.moveNumber}. Missing piece: a ${PIECE_NAMES[piece.type]}.`,
         fen: baseFen,
         player,
         place: [piece.type],
         candidates,
+        excluded,
         solution: winner.sq,
         source: {
           white: header.White, black: header.Black, event: header.Event,
@@ -278,7 +292,8 @@ for (const pgn of splitPgn(pgnText)) {
       console.error(
         `  ✓ puzzle: remove ${piece.type.toUpperCase()} from ${origin} @ move ${pos.moveNumber} — ` +
         `win ${winner.sq} (+${(winner.cp / 100).toFixed(1)}), ` +
-        `losses ${losers.map((l) => `${l.sq} (${(l.cp / 100).toFixed(1)})`).join(', ')}`,
+        `losses ${losers.map((l) => `${l.sq} (${(l.cp / 100).toFixed(1)})`).join(', ')}, ` +
+        `excluded [${excluded.join(' ')}]`,
       );
       break; // at most one puzzle per sampled position, for variety
     }

@@ -3,7 +3,7 @@ export default [
   {
     "id": "gm-1",
     "name": "Anderssen–Kieseritzky, 1851",
-    "description": "From Anderssen, Adolf vs Kieseritzky, Lionel, London 'Immortal Game' 1851, around move 17. Place the queen on one of the highlighted squares — one of them wins, the rest lose.",
+    "description": "From Anderssen, Adolf vs Kieseritzky, Lionel, London 'Immortal Game' 1851, around move 17. Missing piece: a queen.",
     "fen": "rnb1k1nr/p2p1ppp/8/1pbN1N1P/4PBP1/3P1Q2/PPP5/R4KR1 b - - 0 1",
     "player": "b",
     "place": [
@@ -11,10 +11,16 @@ export default [
     ],
     "candidates": [
       "a5",
-      "e3",
-      "e6"
+      "e6",
+      "g3"
     ],
-    "solution": "e3",
+    "excluded": [
+      "d4",
+      "e3",
+      "h1",
+      "h2"
+    ],
+    "solution": "g3",
     "source": {
       "white": "Anderssen, Adolf",
       "black": "Kieseritzky, Lionel",
@@ -23,10 +29,10 @@ export default [
       "moveNumber": 17,
       "removedFrom": "f6",
       "evals": {
-        "win": 844,
+        "win": 849,
         "losses": [
-          -407,
-          -349
+          -345,
+          -372
         ]
       }
     }
@@ -34,16 +40,23 @@ export default [
   {
     "id": "gm-2",
     "name": "Anderssen–Dufresne, 1852",
-    "description": "From Anderssen, Adolf vs Dufresne, Jean, Berlin 'Evergreen Game' 1852, around move 20. Place the queen on one of the highlighted squares — one of them wins, the rest lose.",
+    "description": "From Anderssen, Adolf vs Dufresne, Jean, Berlin 'Evergreen Game' 1852, around move 20. Missing piece: a queen.",
     "fen": "1r2k1r1/pbppRp1p/1bn2P2/8/Q7/B1PB4/P4PPP/3R2K1 b - - 0 1",
     "player": "b",
     "place": [
       "q"
     ],
     "candidates": [
-      "a6",
+      "b5",
       "f3",
       "h3"
+    ],
+    "excluded": [
+      "c8",
+      "d5",
+      "e5",
+      "e6",
+      "g4"
     ],
     "solution": "h3",
     "source": {
@@ -54,10 +67,10 @@ export default [
       "moveNumber": 20,
       "removedFrom": "f3",
       "evals": {
-        "win": 1070,
+        "win": 1098,
         "losses": [
-          -9992,
-          -323
+          -302,
+          -331
         ]
       }
     }
@@ -65,18 +78,23 @@ export default [
   {
     "id": "gm-3",
     "name": "Byrne–Fischer, 1956",
-    "description": "From Byrne, Donald vs Fischer, Robert James, Third Rosenwald Trophy 'Game of the Century' 1956, around move 10. Place the rook on one of the highlighted squares — one of them wins, the rest lose.",
+    "description": "From Byrne, Donald vs Fischer, Robert James, Third Rosenwald Trophy 'Game of the Century' 1956, around move 10. Missing piece: a rook.",
     "fen": "r1bq1rk1/pp2ppbp/1np2np1/8/2QPPB2/2N2N2/PP3PPP/4KB1R w - - 0 1",
     "player": "w",
     "place": [
       "r"
     ],
     "candidates": [
-      "d5",
+      "d6",
       "f5",
-      "g4"
+      "h5"
     ],
-    "solution": "d5",
+    "excluded": [
+      "d5",
+      "d7",
+      "e8"
+    ],
+    "solution": "d6",
     "source": {
       "white": "Byrne, Donald",
       "black": "Fischer, Robert James",
@@ -85,10 +103,10 @@ export default [
       "moveNumber": 10,
       "removedFrom": "d1",
       "evals": {
-        "win": 414,
+        "win": 410,
         "losses": [
-          -380,
-          -405
+          -395,
+          -342
         ]
       }
     }
@@ -96,18 +114,27 @@ export default [
   {
     "id": "gm-4",
     "name": "Byrne–Fischer, 1956",
-    "description": "From Byrne, Donald vs Fischer, Robert James, Third Rosenwald Trophy 'Game of the Century' 1956, around move 16. Place the rook on one of the highlighted squares — one of them wins, the rest lose.",
+    "description": "From Byrne, Donald vs Fischer, Robert James, Third Rosenwald Trophy 'Game of the Century' 1956, around move 16. Missing piece: a rook.",
     "fen": "r4rk1/pp2Bpbp/1qp3p1/8/2BP2b1/Q1n2N2/P4PPP/4K2R w - - 0 1",
     "player": "w",
     "place": [
       "r"
     ],
     "candidates": [
-      "a6",
-      "e8",
-      "f1"
+      "b4",
+      "d6",
+      "e8"
     ],
-    "solution": "a6",
+    "excluded": [
+      "a6",
+      "b1",
+      "b2",
+      "b3",
+      "b5",
+      "b8",
+      "c8"
+    ],
+    "solution": "b4",
     "source": {
       "white": "Byrne, Donald",
       "black": "Fischer, Robert James",
@@ -116,10 +143,10 @@ export default [
       "moveNumber": 16,
       "removedFrom": "d1",
       "evals": {
-        "win": 416,
+        "win": 432,
         "losses": [
-          -354,
-          -329
+          -345,
+          -363
         ]
       }
     }
@@ -127,16 +154,20 @@ export default [
   {
     "id": "gm-5",
     "name": "Rotlewi–Rubinstein, 1907",
-    "description": "From Rotlewi, Georg vs Rubinstein, Akiba, Lodz 'Rubinstein's Immortal' 1907, around move 19. Place the queen on one of the highlighted squares — one of them wins, the rest lose.",
+    "description": "From Rotlewi, Georg vs Rubinstein, Akiba, Lodz 'Rubinstein's Immortal' 1907, around move 19. Missing piece: a queen.",
     "fen": "2rr2k1/1bb1qppp/p3pn2/1p6/1P2PP2/P1NB4/1B4PP/R4RK1 w - - 0 1",
     "player": "w",
     "place": [
       "q"
     ],
     "candidates": [
-      "b3",
-      "d4",
+      "a4",
+      "b1",
       "d7"
+    ],
+    "excluded": [
+      "c5",
+      "d6"
     ],
     "solution": "d7",
     "source": {
@@ -147,10 +178,10 @@ export default [
       "moveNumber": 19,
       "removedFrom": "e2",
       "evals": {
-        "win": 362,
+        "win": 411,
         "losses": [
           -303,
-          -396
+          -317
         ]
       }
     }
@@ -158,18 +189,25 @@ export default [
   {
     "id": "gm-6",
     "name": "Rotlewi–Rubinstein, 1907",
-    "description": "From Rotlewi, Georg vs Rubinstein, Akiba, Lodz 'Rubinstein's Immortal' 1907, around move 22. Place the rook on one of the highlighted squares — one of them wins, the rest lose.",
+    "description": "From Rotlewi, Georg vs Rubinstein, Akiba, Lodz 'Rubinstein's Immortal' 1907, around move 22. Missing piece: a rook.",
     "fen": "2rr2k1/1b3ppp/pb2p3/1p2P3/1P2BPnq/P1N5/1B2Q1PP/5R1K w - - 0 1",
     "player": "w",
     "place": [
       "r"
     ],
     "candidates": [
-      "c2",
-      "g1",
+      "a1",
+      "f6",
+      "h6"
+    ],
+    "excluded": [
+      "g3",
+      "g5",
+      "g6",
+      "h3",
       "h5"
     ],
-    "solution": "h5",
+    "solution": "h6",
     "source": {
       "white": "Rotlewi, Georg",
       "black": "Rubinstein, Akiba",
@@ -178,10 +216,10 @@ export default [
       "moveNumber": 22,
       "removedFrom": "a1",
       "evals": {
-        "win": 536,
+        "win": 489,
         "losses": [
-          -349,
-          -350
+          -359,
+          -400
         ]
       }
     }
@@ -189,7 +227,7 @@ export default [
   {
     "id": "gm-7",
     "name": "Kasparov–Topalov, 1999",
-    "description": "From Kasparov, Garry vs Topalov, Veselin, Hoogovens 'Kasparov's Immortal' 1999, around move 11. Place the rook on one of the highlighted squares — one of them wins, the rest lose.",
+    "description": "From Kasparov, Garry vs Topalov, Veselin, Hoogovens 'Kasparov's Immortal' 1999, around move 11. Missing piece: a rook.",
     "fen": "3qk2r/pb1n1p1p/2pp1npQ/1p2p3/3PP3/P1N2P2/1PP1N1PP/2KR1B1R b - - 0 1",
     "player": "b",
     "place": [
@@ -197,8 +235,13 @@ export default [
     ],
     "candidates": [
       "b3",
-      "g4",
+      "e3",
       "h5"
+    ],
+    "excluded": [
+      "g1",
+      "h3",
+      "h4"
     ],
     "solution": "h5",
     "source": {
@@ -209,10 +252,10 @@ export default [
       "moveNumber": 11,
       "removedFrom": "a8",
       "evals": {
-        "win": 522,
+        "win": 503,
         "losses": [
-          -311,
-          -352
+          -306,
+          -327
         ]
       }
     }
@@ -220,7 +263,7 @@ export default [
   {
     "id": "gm-8",
     "name": "Kasparov–Topalov, 1999",
-    "description": "From Kasparov, Garry vs Topalov, Veselin, Hoogovens 'Kasparov's Immortal' 1999, around move 14. Place the rook on one of the highlighted squares — one of them wins, the rest lose.",
+    "description": "From Kasparov, Garry vs Topalov, Veselin, Hoogovens 'Kasparov's Immortal' 1999, around move 14. Missing piece: a rook.",
     "fen": "2k4r/1b1nqp1p/p1pp1npQ/1p2p3/3PP3/PNN2P2/1PP3PP/1K1R1B1R b - - 0 1",
     "player": "b",
     "place": [
@@ -228,8 +271,13 @@ export default [
     ],
     "candidates": [
       "a2",
-      "e2",
+      "a5",
       "h3"
+    ],
+    "excluded": [
+      "g1",
+      "h4",
+      "h5"
     ],
     "solution": "h3",
     "source": {
@@ -240,10 +288,10 @@ export default [
       "moveNumber": 14,
       "removedFrom": "d8",
       "evals": {
-        "win": 509,
+        "win": 507,
         "losses": [
-          -315,
-          -315
+          -307,
+          -309
         ]
       }
     }

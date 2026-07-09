@@ -30,6 +30,7 @@ const els = {
 
 // ---- State ----
 const state = {
+  proto: Number(localStorage.getItem('chessauto-proto')) === 2 ? 2 : 1,
   puzzle: PUZZLES[0],
   phase: 'setup', // 'setup' | 'playing' | 'done'
   baseMap: {}, // pieces fixed by the puzzle
@@ -38,6 +39,26 @@ const state = {
   enginesReady: false,
   runId: 0, // increments to cancel a playout in flight
 };
+
+// The game is prototyped in selectable variants:
+//   1 — candidate squares: place the piece on one of 2-3 marked squares
+//   2 — hidden square: place anywhere, but the obvious winning squares are
+//       blocked; exactly one of the remaining squares wins
+let activePuzzles = [];
+
+function puzzlesForProto(proto) {
+  return proto === 2 ? PUZZLES.filter((p) => p.excluded) : PUZZLES;
+}
+
+/** Placement is restricted to the puzzle's candidate squares (prototype 1). */
+function usingCandidates() {
+  return state.proto === 1 && Boolean(state.puzzle.candidates);
+}
+
+/** Placement is open except for blocked squares (prototype 2). */
+function usingExclusions() {
+  return state.proto === 2 && Boolean(state.puzzle.excluded);
+}
 
 const whiteEngine = new Engine('white');
 const blackEngine = new Engine('black');
@@ -54,7 +75,7 @@ const board = new Board(els.board, {
 
 function loadPuzzle(index) {
   state.runId++; // cancels any playout in flight
-  const puzzle = PUZZLES[index];
+  const puzzle = activePuzzles[index];
   state.puzzle = puzzle;
   state.phase = 'setup';
   state.baseMap = fenToMap(puzzle.fen);
@@ -101,24 +122,25 @@ function validatePosition() {
 
 function refreshSetup() {
   board.setPosition(currentMap());
-  board.clearHighlights('hint', 'bad', 'last-move', 'selected', 'option');
+  board.clearHighlights('hint', 'bad', 'last-move', 'selected', 'option', 'excluded');
   board.setPlacing(state.selectedTray >= 0);
   renderTray();
 
   const remaining = state.tray.filter((t) => !t.square).length;
 
-  // Candidate-constrained puzzles: auto-select the piece and mark the
-  // squares it may go to.
-  if (state.puzzle.candidates) {
-    if (remaining > 0 && state.selectedTray === -1) {
-      state.selectedTray = state.tray.findIndex((t) => !t.square);
-      board.setPlacing(true);
-      renderTray();
-    }
+  // Single-piece GM puzzles: auto-select the piece so one click places it.
+  if ((usingCandidates() || usingExclusions()) && remaining > 0 && state.selectedTray === -1) {
+    state.selectedTray = state.tray.findIndex((t) => !t.square);
+    board.setPlacing(true);
+    renderTray();
+  }
+  if (usingCandidates()) {
     const map = currentMap();
     for (const sq of state.puzzle.candidates) {
       if (!map[sq]) board.highlight(sq, 'option');
     }
+  } else if (usingExclusions()) {
+    for (const sq of state.puzzle.excluded) board.highlight(sq, 'excluded');
   }
 
   let error = null;
@@ -137,11 +159,15 @@ function refreshSetup() {
   } else if (error) {
     setStatus(error, true);
   } else if (remaining > 0) {
-    setStatus(state.puzzle.candidates
-      ? `Place your ${pieceName(state.tray[0].type)} on one of the ${state.puzzle.candidates.length} highlighted squares. Exactly one of them wins.`
-      : `Place ${remaining} more piece${remaining > 1 ? 's' : ''}. Click a placed piece to pick it back up.`);
+    if (usingCandidates()) {
+      setStatus(`Place your ${pieceName(state.tray[0].type)} on one of the ${state.puzzle.candidates.length} highlighted squares. Exactly one of them wins.`);
+    } else if (usingExclusions()) {
+      setStatus(`Place your ${pieceName(state.tray[0].type)} anywhere except the ✕ squares — those win too obviously. Exactly one legal square wins.`);
+    } else {
+      setStatus(`Place ${remaining} more piece${remaining > 1 ? 's' : ''}. Click a placed piece to pick it back up.`);
+    }
   } else {
-    setStatus(state.puzzle.candidates
+    setStatus(usingCandidates() || usingExclusions()
       ? 'Piece placed — press “Play it out”, or click it to try a different square.'
       : 'Position set! Press “Play it out” and the engines will battle it out.');
   }
@@ -194,8 +220,12 @@ function handleSquareClick(square) {
 function placeSelected(square) {
   const item = state.tray[state.selectedTray];
   if (!item || state.phase !== 'setup') return;
-  if (state.puzzle.candidates && !state.puzzle.candidates.includes(square)) {
+  if (usingCandidates() && !state.puzzle.candidates.includes(square)) {
     setStatus('This puzzle only allows the highlighted squares.', true);
+    return;
+  }
+  if (usingExclusions() && state.puzzle.excluded.includes(square)) {
+    setStatus('That square is blocked — it wins too obviously. Find the hidden winning square.', true);
     return;
   }
   if (currentMap()[square]) {
@@ -245,7 +275,7 @@ async function play() {
   els.movelist.innerHTML = '';
   els.banner.classList.add('hidden');
   els.progress.classList.remove('hidden');
-  board.clearHighlights('hint', 'bad', 'selected', 'option');
+  board.clearHighlights('hint', 'bad', 'selected', 'option', 'excluded');
 
   const game = new Chess(currentFen());
   let plies = 0;
@@ -390,25 +420,39 @@ function pieceName(type) {
 
 // ---- Wiring ----
 
-PUZZLES.forEach((p, i) => {
-  const opt = document.createElement('option');
-  opt.value = String(i);
-  opt.textContent = `${i + 1}. ${p.name} (${p.player === 'w' ? 'White' : 'Black'})`;
-  els.puzzleSelect.appendChild(opt);
-});
+function setPrototype(proto) {
+  state.proto = proto;
+  localStorage.setItem('chessauto-proto', String(proto));
+  for (const btn of document.querySelectorAll('#proto-switch button')) {
+    btn.classList.toggle('active', Number(btn.dataset.proto) === proto);
+  }
+  activePuzzles = puzzlesForProto(proto);
+  els.puzzleSelect.innerHTML = '';
+  activePuzzles.forEach((p, i) => {
+    const opt = document.createElement('option');
+    opt.value = String(i);
+    opt.textContent = `${i + 1}. ${p.name} (${p.player === 'w' ? 'White' : 'Black'})`;
+    els.puzzleSelect.appendChild(opt);
+  });
+  loadPuzzle(0);
+}
+
+for (const btn of document.querySelectorAll('#proto-switch button')) {
+  btn.addEventListener('click', () => setPrototype(Number(btn.dataset.proto)));
+}
 els.puzzleSelect.addEventListener('change', () => loadPuzzle(Number(els.puzzleSelect.value)));
 els.prevPuzzle.addEventListener('click', () => {
-  loadPuzzle((Number(els.puzzleSelect.value) + PUZZLES.length - 1) % PUZZLES.length);
+  loadPuzzle((Number(els.puzzleSelect.value) + activePuzzles.length - 1) % activePuzzles.length);
 });
 els.nextPuzzle.addEventListener('click', () => {
-  loadPuzzle((Number(els.puzzleSelect.value) + 1) % PUZZLES.length);
+  loadPuzzle((Number(els.puzzleSelect.value) + 1) % activePuzzles.length);
 });
 els.playBtn.addEventListener('click', play);
 els.stopBtn.addEventListener('click', stopPlayout);
 els.retryBtn.addEventListener('click', backToSetup);
 els.resetBtn.addEventListener('click', resetPlacements);
 
-loadPuzzle(0);
+setPrototype(state.proto);
 
 Promise.all([whiteEngine.init(), blackEngine.init()])
   .then(() => {

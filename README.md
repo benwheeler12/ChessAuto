@@ -13,14 +13,20 @@ delivers checkmate. Draws don't count.
 
 ## How to play
 
-**Grandmaster puzzles** (the main mode): a sharp position from a real
-grandmaster game is shown with one of your pieces removed, and 2–3 candidate
-squares are highlighted. Exactly one of them makes your position completely
-winning — the others lose. Click a square, press play, and find out which kind
-you picked.
+The game is in an experimentation phase — the site offers selectable
+**prototypes** of the core idea (a sharp grandmaster position with one of your
+pieces removed; put it back so your side wins the engine playout):
 
-**Classic free-placement puzzles**: the missing pieces appear in a tray and you
-may put them anywhere legal.
+- **Prototype 1 — pick from 3 squares**: 2–3 candidate squares are
+  highlighted. Exactly one makes your position completely winning; the others
+  lose.
+- **Prototype 2 — find the hidden square**: place the piece anywhere, but the
+  *obvious* winning squares are blocked (marked ✕). Exactly one of the
+  remaining squares wins — find it.
+
+Prototype 1 also includes the original hand-written free-placement puzzles
+(missing pieces in a tray, put them anywhere legal) as a sandbox at the end of
+the list.
 
 1. Pick a puzzle — the missing pieces appear in the tray.
 2. Drag a piece onto an empty square (or click the piece, then a square).
