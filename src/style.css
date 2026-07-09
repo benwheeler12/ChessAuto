@@ -272,14 +272,14 @@ button.danger { background: var(--danger); color: #fff; flex: 1; }
 
 .movelist {
   margin: 0;
-  padding: 0 0 0 1.6rem;
+  padding: 0 0 0 2.2rem;
   max-height: 200px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   font-size: 0.88rem;
   font-variant-numeric: tabular-nums;
-  columns: 2;
 }
-.movelist li { margin-bottom: 0.15rem; break-inside: avoid; }
+.movelist li { margin-bottom: 0.15rem; }
 
 footer {
   text-align: center;
