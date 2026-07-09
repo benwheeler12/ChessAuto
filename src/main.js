@@ -5,8 +5,6 @@ import { Board, pieceClass } from './board.js';
 import { fenToMap, buildFen, flipTurn, rankOf } from './fen.js';
 
 const MOVETIME_MS = 300; // per engine move during the playout
-const ADJUDICATION_MOVETIME_MS = 2000; // deeper think for the final verdict
-const WIN_THRESHOLD_CP = 300; // "decisive advantage" at the move cap
 
 // ---- DOM ----
 const $ = (id) => document.getElementById(id);
@@ -214,7 +212,6 @@ async function play() {
   if (error) { setStatus(error, true); return; }
 
   const runId = ++state.runId;
-  const puzzle = state.puzzle;
   state.phase = 'playing';
   els.playBtn.classList.add('hidden');
   els.stopBtn.classList.remove('hidden');
@@ -228,7 +225,6 @@ async function play() {
   board.clearHighlights('hint', 'bad', 'selected');
 
   const game = new Chess(currentFen());
-  const maxPlies = puzzle.moveCap * 2;
   let plies = 0;
 
   await Promise.all([whiteEngine.newGame(), blackEngine.newGame()]);
@@ -237,7 +233,7 @@ async function play() {
   setStatus('Engines are playing… ♜ vs ♜');
   let lastWhiteCp = 0;
 
-  while (plies < maxPlies && !game.isGameOver()) {
+  while (!game.isGameOver()) {
     const sideToMove = game.turn();
     const engine = sideToMove === 'w' ? whiteEngine : blackEngine;
     const { move, score } = await engine.search(game.fen(), MOVETIME_MS);
@@ -264,11 +260,11 @@ async function play() {
     await board.animateMoves(slides, fenToMap(game.fen()));
     if (runId !== state.runId) return;
     appendMove(played, game);
-    els.progress.textContent = `Move ${Math.ceil(plies / 2)} of ${puzzle.moveCap}`;
+    els.progress.textContent = `Move ${Math.ceil(plies / 2)}`;
   }
 
   if (runId !== state.runId) return;
-  await finish(game, plies >= maxPlies, runId);
+  finish(game);
 }
 
 function appendMove(played, game) {
@@ -279,7 +275,7 @@ function appendMove(played, game) {
   li.scrollIntoView({ block: 'nearest' });
 }
 
-async function finish(game, hitCap, runId) {
+function finish(game) {
   const player = state.puzzle.player;
   const playerName = player === 'w' ? 'White' : 'Black';
   let win = false;
@@ -295,21 +291,6 @@ async function finish(game, hitCap, runId) {
   } else if (game.isDraw()) {
     title = 'Drawn — not a win';
     detail = drawReason(game) + ' A draw doesn’t count: the position has to actually win.';
-  } else if (hitCap) {
-    setStatus('Move limit reached — adjudicating the final position…');
-    const score = await whiteEngine.evaluate(game.fen(), ADJUDICATION_MOVETIME_MS);
-    if (runId !== state.runId) return;
-    const whiteCp = scoreToWhiteCp(score, game.turn());
-    const playerCp = player === 'w' ? whiteCp : -whiteCp;
-    setEvalBar(whiteCp);
-    win = playerCp >= WIN_THRESHOLD_CP;
-    const evalText = Math.abs(whiteCp) >= 9000
-      ? 'a forced mate on the board'
-      : `an evaluation of ${(playerCp / 100).toFixed(1)} pawns for ${playerName}`;
-    title = win ? 'Decisive advantage — you win! 🏆' : 'Not winning — you lose';
-    detail = win
-      ? `After ${state.puzzle.moveCap} moves the engines judge your position completely winning, with ${evalText}.`
-      : `After ${state.puzzle.moveCap} moves the position isn’t clearly winning (${evalText}). It needs at least +${WIN_THRESHOLD_CP / 100} to count.`;
   } else {
     title = 'Playout ended';
     detail = 'The engines stopped early — try playing it out again.';

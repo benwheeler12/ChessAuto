@@ -36,7 +36,6 @@ for (const puzzle of PUZZLES) {
   }
 
   if (!puzzle.place.length) fail(puzzle, 'no pieces to place');
-  if (puzzle.moveCap < 20 || puzzle.moveCap > 30) fail(puzzle, `moveCap ${puzzle.moveCap} outside 20–30`);
 }
 
 if (failures) {
