@@ -8,8 +8,6 @@
 //   fen    - the semicomplete position, with the player's side to move
 //   player - which color the user is constructing a win for ('w' | 'b')
 //   place  - piece types (lowercase) the player must put back on the board
-//   moveCap- how many full moves the engines play before the position is
-//            adjudicated (win requires checkmate or a decisive engine eval)
 
 export const PUZZLES = [
   {
@@ -21,7 +19,6 @@ export const PUZZLES = [
     fen: 'r5k1/5ppp/8/8/8/8/5PPP/6K1 w - - 0 1',
     player: 'w',
     place: ['q'],
-    moveCap: 25,
   },
   {
     id: 'heavy-support',
@@ -31,7 +28,6 @@ export const PUZZLES = [
     fen: '2r2rk1/5ppp/8/8/8/8/5PPP/6K1 w - - 0 1',
     player: 'w',
     place: ['q', 'r'],
-    moveCap: 25,
   },
   {
     id: 'minor-details',
@@ -42,7 +38,6 @@ export const PUZZLES = [
     fen: '3r2k1/5ppp/8/8/8/8/5PPP/6K1 w - - 0 1',
     player: 'w',
     place: ['r', 'b', 'n'],
-    moveCap: 30,
   },
   {
     id: 'turning-tables',
@@ -53,7 +48,6 @@ export const PUZZLES = [
     fen: '6k1/5ppp/8/8/8/8/5PPP/R5K1 b - - 0 1',
     player: 'b',
     place: ['q'],
-    moveCap: 25,
   },
   {
     id: 'silence-the-knight',
@@ -64,7 +58,6 @@ export const PUZZLES = [
     fen: '6k1/pp4pp/8/5n2/8/8/PP4PP/6K1 w - - 0 1',
     player: 'w',
     place: ['q'],
-    moveCap: 25,
   },
   {
     id: 'crowded-house',
@@ -75,7 +68,6 @@ export const PUZZLES = [
     fen: 'r1bq2k1/pppp1ppp/2n2n2/4p3/8/8/PPPP1PPP/RNB1KBN1 w - - 0 1',
     player: 'w',
     place: ['q', 'r'],
-    moveCap: 30,
   },
   {
     id: 'fortress-builder',
@@ -86,7 +78,6 @@ export const PUZZLES = [
     fen: '6k1/5ppp/8/8/8/8/5PPP/3Q2K1 b - - 0 1',
     player: 'b',
     place: ['q', 'r'],
-    moveCap: 25,
   },
   {
     id: 'grand-finale',
@@ -97,6 +88,5 @@ export const PUZZLES = [
     fen: 'r5k1/ppp2ppp/2n1bn2/8/8/8/PPP2PPP/2B1K1N1 w - - 0 1',
     player: 'w',
     place: ['q', 'r', 'b'],
-    moveCap: 30,
   },
 ];

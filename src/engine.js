@@ -75,12 +75,6 @@ export class Engine {
     return { move: line.split(/\s+/)[1], score };
   }
 
-  /** Evaluate a position (score from the side-to-move's perspective). */
-  async evaluate(fen, movetimeMs = 1500) {
-    const { score } = await this.search(fen, movetimeMs);
-    return score;
-  }
-
   stop() {
     this.worker?.postMessage('stop');
   }
