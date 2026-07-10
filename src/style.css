@@ -474,6 +474,8 @@ main {
 button.primary { background: var(--accent); color: #14130f; flex: 1; }
 button.primary:not(:disabled):hover { background: var(--accent-2); }
 button.secondary { background: var(--panel-2); color: var(--text); }
+button.step-btn { min-width: 3rem; }
+#continue-btn { flex: 1; }
 button.danger { background: var(--danger); color: #fff; flex: 1; }
 button.lichess-btn {
   background: transparent;
