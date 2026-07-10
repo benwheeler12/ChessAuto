@@ -165,6 +165,50 @@ export function allowedZone(puzzle) {
   return { from: String.fromCharCode(97 + f0) + r0, to: String.fromCharCode(97 + f1) + r1 };
 }
 
+/**
+ * The allowed squares grouped for outlining on the board: islands of
+ * cardinally adjacent squares, isolated squares as 1-square islands.
+ * A perfect rectangular zone (see allowedZone) comes back as a single
+ * island covering the whole rectangle, occupied squares included, so
+ * sectors keep a clean box.
+ */
+export function allowedIslands(puzzle) {
+  const allowed = puzzle.placement?.allowed;
+  if (!allowed?.length) return [];
+  let cells = allowed;
+  const zone = allowedZone(puzzle);
+  if (zone) {
+    cells = [];
+    for (let f = zone.from.charCodeAt(0); f <= zone.to.charCodeAt(0); f++) {
+      for (let r = rankOf(zone.from); r <= rankOf(zone.to); r++) {
+        cells.push(String.fromCharCode(f) + r);
+      }
+    }
+  }
+  const set = new Set(cells);
+  const seen = new Set();
+  const islands = [];
+  for (const start of cells) {
+    if (seen.has(start)) continue;
+    seen.add(start);
+    const island = [];
+    const stack = [start];
+    while (stack.length) {
+      const sq = stack.pop();
+      island.push(sq);
+      for (const [df, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nb = String.fromCharCode(sq.charCodeAt(0) + df) + (rankOf(sq) + dr);
+        if (set.has(nb) && !seen.has(nb)) {
+          seen.add(nb);
+          stack.push(nb);
+        }
+      }
+    }
+    islands.push(island);
+  }
+  return islands;
+}
+
 /** Human-readable rule chips for the UI, derived purely from the contract. */
 export function ruleChips(puzzle) {
   const chips = [];
