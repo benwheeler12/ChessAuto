@@ -428,7 +428,13 @@ async function play() {
     if (runId !== state.runId) return;
     state.playoutFen = item.fen;
     appendMove(mv, item.moveNo);
-    els.progress.textContent = `Move ${Math.ceil(plies / 2)}`;
+    // Fifty-move rule watch: the FEN's halfmove clock counts plies since the
+    // last capture or pawn move; at 100 the game is drawn. Surface it once a
+    // draw is genuinely on the horizon so long grinds aren't a mystery.
+    const quietPlies = Number(item.fen.split(' ')[4]);
+    els.progress.textContent = quietPlies >= 60
+      ? `Move ${Math.ceil(plies / 2)} · no captures or pawn moves for ${Math.floor(quietPlies / 2)} — drawn at 50`
+      : `Move ${Math.ceil(plies / 2)}`;
 
     const rest = movePaceMs() - (performance.now() - stepStart);
     if (rest > 0) {
@@ -591,7 +597,11 @@ function drawReason(game) {
   if (game.isStalemate()) return 'The game ended in stalemate.';
   if (game.isInsufficientMaterial()) return 'Neither side had enough material to mate.';
   if (game.isThreefoldRepetition()) return 'The position repeated three times.';
-  return 'The game was drawn by the fifty-move rule.';
+  if (game.isDrawByFiftyMoves()) {
+    return 'Fifty consecutive moves passed without a capture or a pawn move — ' +
+      'drawn by the fifty-move rule.';
+  }
+  return 'The game was drawn.';
 }
 
 function stopPlayout() {
