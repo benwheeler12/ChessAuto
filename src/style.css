@@ -126,6 +126,24 @@ main {
   background-image: radial-gradient(circle, rgba(255, 210, 77, 0.85) 30%, transparent 32%);
 }
 
+/* Rectangular placement zone (sector puzzles): one outlined region */
+.board .zone {
+  position: absolute;
+  pointer-events: none;
+  z-index: 3;
+  border: 3px solid var(--accent-2);
+  border-radius: 8px;
+  box-shadow:
+    0 0 0 2px rgba(20, 30, 15, 0.35),
+    0 0 18px rgba(149, 187, 74, 0.55),
+    inset 0 0 14px rgba(149, 187, 74, 0.28);
+  animation: zone-breathe 2.6s ease-in-out infinite;
+}
+@keyframes zone-breathe {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(20, 30, 15, 0.35), 0 0 18px rgba(149, 187, 74, 0.55), inset 0 0 14px rgba(149, 187, 74, 0.28); }
+  50% { box-shadow: 0 0 0 2px rgba(20, 30, 15, 0.35), 0 0 8px rgba(149, 187, 74, 0.3), inset 0 0 6px rgba(149, 187, 74, 0.14); }
+}
+
 /* Blocked squares in prototype 2 (too-obvious winning placements) */
 .square.excluded {
   background-image:
