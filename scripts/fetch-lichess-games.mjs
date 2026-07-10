@@ -6,8 +6,8 @@
 //   [--min-elo 2300] [--min-base 180] [--out data/lichess-games.pgn]
 
 import { createWriteStream } from 'node:fs';
-import { createZstdDecompress } from 'node:zlib';
 import { spawn } from 'node:child_process';
+import { Decompress } from 'fzstd';
 import { Chess } from 'chess.js';
 
 const opt = (name, dflt) => {
@@ -24,31 +24,7 @@ const URL = `https://database.lichess.org/standard/lichess_db_standard_rated_${M
 // curl honors the environment's HTTPS proxy (Node's fetch does not).
 const curl = spawn('curl', ['-sS', '--fail', URL], { stdio: ['ignore', 'pipe', 'inherit'] });
 
-// Lichess dumps use the seekable-zstd format, which opens with a skippable
-// frame that Node's decoder rejects — strip any leading skippable frames.
-let headStripped = false;
-let headBuf = Buffer.alloc(0);
-function stripSkippable(chunk) {
-  if (headStripped) return chunk;
-  headBuf = Buffer.concat([headBuf, chunk]);
-  while (headBuf.length >= 8) {
-    const magic = headBuf.readUInt32LE(0);
-    if (magic >= 0x184d2a50 && magic <= 0x184d2a5f) {
-      const size = headBuf.readUInt32LE(4);
-      if (headBuf.length < 8 + size) return Buffer.alloc(0); // need more bytes
-      headBuf = headBuf.subarray(8 + size);
-    } else {
-      headStripped = true;
-      const rest = headBuf;
-      headBuf = Buffer.alloc(0);
-      return rest;
-    }
-  }
-  return Buffer.alloc(0);
-}
-
 const out = createWriteStream(OUT);
-const zstd = createZstdDecompress();
 let buffer = '';
 let kept = 0;
 let seen = 0;
@@ -116,10 +92,9 @@ function finalize(note) {
   console.error(`\n${note}: ${kept} games → ${OUT} (scanned ${seen}, downloaded ${(bytesIn / 1e6).toFixed(1)} MB)`);
   process.exit(kept > 0 ? 0 : 1);
 }
-zstd.on('error', () => finalize('decoder stopped (mid-stream frame)'));
-
-zstd.on('data', (data) => {
-  buffer += data.toString('utf8');
+const decoder = new TextDecoder();
+const zstd = new Decompress((data) => {
+  buffer += decoder.decode(data, { stream: true });
   if (buffer.length > 4e6 || buffer.includes('\n\n[Event ')) {
     if (processBuffer()) {
       out.end();
@@ -129,12 +104,12 @@ zstd.on('data', (data) => {
   }
 });
 
-for await (const chunk of curl.stdout) {
-  bytesIn += chunk.length;
-  const usable = stripSkippable(chunk);
-  if (usable.length && !zstd.write(usable)) {
-    await new Promise((resolve) => zstd.once('drain', resolve));
+try {
+  for await (const chunk of curl.stdout) {
+    bytesIn += chunk.length;
+    zstd.push(new Uint8Array(chunk));
   }
+} catch (err) {
+  finalize(`decoder stopped (${err.message})`);
 }
-zstd.end();
 finalize('stream ended');
