@@ -100,6 +100,13 @@ and ship a new batch (they require `--label "…"`, shown in the dropdown):
   qualifies them under open-board rules: opponent moves first, at most two
   placements on the whole board win. Positions already used by any existing
   batch are skipped automatically.
+- `npm run generate:sectors -- --label "…"` (`scripts/generate-sectors.mjs`)
+  — 3×3 **sector builds**: from positions where the player is winning but
+  the opponent moves first, it finds a tactically hot 3×3 zone (pieces of
+  both colors, lots of contact), removes the player's 2–3 pieces from that
+  zone, and keeps the position only when few ways of putting them back
+  inside the zone still win. The player has to assemble a piece structure
+  that works together, not just find one strong square.
 
 After generating, `npm run generate:lines -- --file src/puzzles/batch-….js`
 optionally precomputes a full engine-vs-engine playout line (moves + evals)
