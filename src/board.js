@@ -75,6 +75,11 @@ export class Board {
 
   /** @param {Record<string, {type: string, color: string, placed?: boolean}>} position */
   setPosition(position) {
+    // Any redraw invalidates in-flight move animations: bump the epoch so a
+    // finishing animation doesn't overwrite this position, and clear its
+    // floating pieces (fixes Stop mid-slide leaving the game position up).
+    this.epoch = (this.epoch ?? 0) + 1;
+    for (const float of this.el.querySelectorAll('.piece.floating')) float.remove();
     for (const [name, cell] of this.squares) {
       const piece = position[name];
       let span = cell.querySelector('.piece');
@@ -133,7 +138,14 @@ export class Board {
       this.setPosition(newPosition);
       return Promise.resolve();
     }
+    const epoch = this.epoch ?? 0;
     return Promise.all(animations).then(() => {
+      if ((this.epoch ?? 0) !== epoch) {
+        // The board was redrawn while we were sliding (e.g. Stop reset it) —
+        // don't stomp the new position.
+        for (const float of floats) float.remove();
+        return;
+      }
       this.setPosition(newPosition);
       for (const float of floats) float.remove();
     });
