@@ -1,10 +1,14 @@
 import '@fontsource-variable/inter';
 import '@fontsource-variable/space-grotesk';
-import { Chess, validateFen } from 'chess.js';
-import { PUZZLES } from './puzzles.js';
+import { Chess } from 'chess.js';
+import { COLLECTIONS } from './puzzles/index.js';
 import { Engine, scoreToWhiteCp } from './engine.js';
 import { Board, pieceClass } from './board.js';
-import { fenToMap, buildFen, flipTurn, rankOf } from './fen.js';
+import { fenToMap, buildFen } from './fen.js';
+import {
+  turnFor, signature, startFen, placementError, startPositionError,
+  expectedVerdict, lineFor, ruleChips,
+} from './puzzle-contract.js';
 
 const MOVETIME_MS = 300; // per engine move during the playout
 const DEFAULT_ANIM_MS = 50; // piece-slide duration (user-adjustable via slider)
@@ -22,11 +26,13 @@ const els = {
   board: $('board'),
   banner: $('banner'),
   evalFill: $('eval-fill'),
+  collectionSelect: $('collection-select'),
   puzzleSelect: $('puzzle-select'),
   prevPuzzle: $('prev-puzzle'),
   nextPuzzle: $('next-puzzle'),
   puzzleName: $('puzzle-name'),
   puzzleDesc: $('puzzle-desc'),
+  ruleChips: $('rule-chips'),
   status: $('status'),
   tray: $('tray'),
   trayLabel: $('tray-label'),
@@ -45,90 +51,45 @@ function moveAnimMs() {
   return Number(els.speedSlider.value) || DEFAULT_ANIM_MS;
 }
 
+// ---- Played / rating history (drives NEW badges and the fun-research loop) ----
+const played = new Set(JSON.parse(localStorage.getItem('chessauto-played') ?? '[]'));
+const ratings = JSON.parse(localStorage.getItem('chessauto-ratings') ?? '{}');
+
+function markPlayed(id) {
+  if (played.has(id)) return;
+  played.add(id);
+  localStorage.setItem('chessauto-played', JSON.stringify([...played]));
+  renderCollectionOptions();
+  renderPuzzleOptions();
+}
+
+function ratePuzzle(id, value) {
+  ratings[id] = ratings[id] === value ? undefined : value;
+  if (ratings[id] === undefined) delete ratings[id];
+  localStorage.setItem('chessauto-ratings', JSON.stringify(ratings));
+}
+
 // ---- State ----
 const state = {
-  proto: Number(localStorage.getItem('chessauto-proto')) === 2 ? 2 : 1,
-  puzzle: PUZZLES[0],
+  collection: 0, // index into COLLECTIONS (0 = newest batch)
+  puzzle: COLLECTIONS[0].puzzles[0],
   phase: 'setup', // 'setup' | 'playing' | 'done'
-  baseMap: {}, // pieces fixed by the puzzle
-  tray: [], // [{ type, square: string|null }] — the player's pieces to place
+  baseMap: {},
+  tray: [], // [{ type, square: string|null }]
   selectedTray: -1,
   enginesReady: false,
-  runId: 0, // increments to cancel a playout in flight
+  runId: 0,
+  baseCp: 0,
 };
 
-// The game is prototyped in selectable variants:
-//   1 — candidate squares: place the piece on one of 2-3 marked squares
-//   2 — hidden square: place anywhere, but the obvious winning squares are
-//       blocked; exactly one of the remaining squares wins
-//   3 — like 2, but the OPPONENT moves first after placement, so instant
-//       captures don't work (analysed separately by the generator)
-//   4 — like 3, but nothing is blocked: place anywhere; at most two squares
-//       on the whole board win, and the piece may be a pawn, minor, or king
-let activePuzzles = [];
+const activePuzzles = () => COLLECTIONS[state.collection].puzzles;
 
-function puzzlesForProto(proto) {
-  if (proto === 2) return PUZZLES.filter((p) => p.excluded);
-  if (proto === 3) return PUZZLES.filter((p) => p.p3);
-  if (proto === 4) return PUZZLES.filter((p) => p.p4);
-  if (proto === 5) return PUZZLES.filter((p) => p.p5);
-  return PUZZLES.filter((p) => p.candidates || !p.source);
+/** Current placements from the tray (only pieces already on the board). */
+function placements() {
+  return state.tray.filter((t) => t.square).map((t) => ({ type: t.type, square: t.square }));
 }
 
-/** Placement is restricted to the puzzle's candidate squares (prototype 1). */
-function usingCandidates() {
-  return state.proto === 1 && Boolean(state.puzzle.candidates);
-}
-
-/** Placement is open except for blocked squares (prototypes 2 and 3). */
-function usingExclusions() {
-  return Boolean(activeExclusions());
-}
-
-/** The blocked-square list for the active prototype, if any. */
-function activeExclusions() {
-  if (state.proto === 2 && state.puzzle.excluded) return state.puzzle.excluded;
-  if (state.proto === 3 && state.puzzle.p3) return state.puzzle.p3.excluded;
-  return null; // prototype 4 blocks nothing
-}
-
-/**
- * Open-board data for the active prototype: P4 and P5 share identical rules
- * (place anywhere, opponent moves first, at most two winning squares) and
- * differ only in how their puzzle sets were discovered.
- */
-function openSetData() {
-  if (state.proto === 4 && state.puzzle.p4) return state.puzzle.p4;
-  if (state.proto === 5 && state.puzzle.p5) return state.puzzle.p5;
-  return null;
-}
-
-/** Prototype 4/5: open placement, opponent first, nothing blocked. */
-function usingP4() {
-  return Boolean(openSetData());
-}
-
-/** Prototypes 3-5 flip the side to move: the opponent replies first. */
-function currentTurn() {
-  const baseTurn = state.puzzle.fen.split(' ')[1];
-  if ((state.proto === 3 && state.puzzle.p3) || usingP4()) {
-    return baseTurn === 'w' ? 'b' : 'w';
-  }
-  return baseTurn;
-}
-
-/**
- * The precomputed playout line for the current placement, if the generator
- * shipped one ({ m: 'uci uci …', e: 'cp cp …' }). With a line in hand the
- * playout needs no engine at all.
- */
-function lineForPlacement() {
-  if (state.tray.length !== 1) return null;
-  const sq = state.tray[0].square;
-  if (!sq || !state.puzzle.lines) return null;
-  const key = currentTurn() === state.puzzle.player ? 'own' : 'opp';
-  return state.puzzle.lines[key]?.[sq] ?? null;
-}
+const allPlaced = () => state.tray.every((t) => t.square);
 
 const whiteEngine = new Engine('white');
 const blackEngine = new Engine('black');
@@ -145,7 +106,7 @@ const board = new Board(els.board, {
 
 function loadPuzzle(index) {
   state.runId++; // cancels any playout in flight
-  const puzzle = activePuzzles[index];
+  const puzzle = activePuzzles()[index];
   state.puzzle = puzzle;
   state.phase = 'setup';
   state.baseMap = fenToMap(puzzle.fen);
@@ -155,6 +116,13 @@ function loadPuzzle(index) {
   els.puzzleSelect.value = String(index);
   els.puzzleName.textContent = puzzle.name;
   els.puzzleDesc.textContent = puzzle.description;
+  els.ruleChips.innerHTML = '';
+  for (const chip of ruleChips(puzzle)) {
+    const span = document.createElement('span');
+    span.className = 'chip';
+    span.textContent = chip;
+    els.ruleChips.appendChild(span);
+  }
   els.movelist.innerHTML = '';
   els.banner.classList.add('hidden');
   els.progress.classList.add('hidden');
@@ -164,8 +132,6 @@ function loadPuzzle(index) {
 }
 
 // ---- Base-position evaluation for the eval bar ----
-// Before any piece is placed, the bar shows how bad things are WITHOUT the
-// missing piece, so a good placement visibly swings it during the playout.
 let baseEvalToken = 0;
 
 async function showBaseEval() {
@@ -178,10 +144,9 @@ async function showBaseEval() {
     return;
   }
   setEvalBar(0);
-  const fen = buildFen(state.baseMap, currentTurn());
+  const fen = buildFen(state.baseMap, turnFor(state.puzzle));
   try {
     await whiteEngine.init();
-    // Serialize with any earlier base eval still searching.
     if (state.baseEvalSearch) await state.baseEvalSearch.catch(() => {});
     if (token !== baseEvalToken || state.phase !== 'setup') return;
     state.baseEvalSearch = whiteEngine.search(fen, 250);
@@ -191,98 +156,88 @@ async function showBaseEval() {
     state.baseCp = scoreToWhiteCp(score, fen.split(' ')[1]);
     setEvalBar(state.baseCp);
   } catch {
-    // Engines unavailable (e.g. blocked download) — leave the bar neutral.
+    // Engines unavailable — leave the bar neutral.
   }
 }
 
 function currentMap() {
   const map = { ...state.baseMap };
-  for (const item of state.tray) {
-    if (item.square) map[item.square] = { type: item.type, color: state.puzzle.player, placed: true };
+  for (const p of placements()) {
+    map[p.square] = { type: p.type, color: state.puzzle.player, placed: true };
   }
   return map;
 }
 
-function currentFen() {
-  return buildFen(currentMap(), currentTurn());
-}
-
-/** Validate the fully-constructed position. Returns an error string or null. */
-function validatePosition() {
-  const fen = currentFen();
-  const check = validateFen(fen);
-  if (!check.ok) return 'That position is not legal chess.';
-  const game = new Chess(fen);
-  // The opponent (side not to move) may not start the game in check.
-  const flipped = new Chess(flipTurn(fen));
-  if (flipped.isCheck()) {
-    // With the opponent to move (prototypes 3/4) this means the PLAYER would
-    // start in check — only possible when placing the king badly.
-    return currentTurn() === state.puzzle.player
-      ? 'You can’t place a piece that gives immediate check — the engines need a legal starting position.'
-      : 'Your king can’t be placed into check — pick a safer square.';
-  }
-  if (game.isGameOver()) return 'That position is already over before a move is played.';
-  return null;
-}
-
 function refreshSetup() {
+  const puzzle = state.puzzle;
   board.setPosition(currentMap());
   board.clearHighlights('hint', 'bad', 'last-move', 'selected', 'option', 'excluded');
-  board.setPlacing(state.selectedTray >= 0);
   renderTray();
 
   const remaining = state.tray.filter((t) => !t.square).length;
 
-  // Single-piece GM puzzles: auto-select the piece so one click places it.
-  if ((usingCandidates() || usingExclusions() || usingP4()) && remaining > 0 && state.selectedTray === -1) {
-    state.selectedTray = state.tray.findIndex((t) => !t.square);
-    board.setPlacing(true);
+  // Single-piece puzzles: auto-select the piece so one click places it.
+  if (puzzle.place.length === 1 && remaining > 0 && state.selectedTray === -1) {
+    state.selectedTray = 0;
     renderTray();
   }
-  if (usingCandidates()) {
-    const map = currentMap();
-    for (const sq of state.puzzle.candidates) {
-      if (!map[sq]) board.highlight(sq, 'option');
-    }
-  } else if (usingExclusions()) {
-    for (const sq of activeExclusions()) board.highlight(sq, 'excluded');
+  board.setPlacing(state.selectedTray >= 0);
+
+  // Constraint markers come straight from the contract.
+  const map = currentMap();
+  for (const sq of puzzle.placement?.allowed ?? []) {
+    if (!map[sq]) board.highlight(sq, 'option');
+  }
+  for (const sq of puzzle.placement?.blocked ?? []) {
+    board.highlight(sq, 'excluded');
   }
 
   let error = null;
-  if (remaining === 0) error = validatePosition();
+  if (remaining === 0) error = startPositionError(puzzle, placements());
 
-  // Puzzles with precomputed lines don't need the engines at all.
-  const canRun = state.enginesReady || Boolean(lineForPlacement());
+  const canRun = state.enginesReady || Boolean(allPlaced() && lineFor(puzzle, placements()));
   els.playBtn.disabled = !(canRun && remaining === 0 && !error);
   els.playBtn.classList.remove('hidden');
   els.stopBtn.classList.add('hidden');
   els.retryBtn.classList.add('hidden');
-  // Reset only exists while placing pieces.
   els.resetBtn.classList.remove('hidden');
   els.resetBtn.disabled = false;
   els.trayLabel.classList.remove('hidden');
   els.tray.classList.remove('hidden');
 
-  if (!state.enginesReady && !state.puzzle.lines) {
+  if (!state.enginesReady && !puzzle.lines) {
     setStatus('Loading engines… you can start placing pieces meanwhile.');
   } else if (error) {
     setStatus(error, true);
   } else if (remaining > 0) {
-    if (usingCandidates()) {
-      setStatus(`Place your ${pieceName(state.tray[0].type)} on one of the ${state.puzzle.candidates.length} highlighted squares. Exactly one of them wins.`);
-    } else if (usingExclusions()) {
-      setStatus(`Place your ${pieceName(state.tray[0].type)} anywhere except the ✕ squares — those win too obviously. Exactly one legal square wins.${state.proto === 3 ? ' Careful: your opponent moves first!' : ''}`);
-    } else if (usingP4()) {
-      setStatus(`Place your ${pieceName(state.tray[0].type)} anywhere. At most two squares on the whole board win — and your opponent moves first!`);
-    } else {
-      setStatus(`Place ${remaining} more piece${remaining > 1 ? 's' : ''}. Click a placed piece to pick it back up.`);
-    }
+    setStatus(setupHint(puzzle, remaining));
   } else {
-    setStatus(usingCandidates() || usingExclusions() || usingP4()
+    setStatus(puzzle.place.length === 1
       ? 'Piece placed — press “Play it out”, or click it to try a different square.'
       : 'Position set! Press “Play it out” and the engines will battle it out.');
   }
+}
+
+/** Setup instruction derived from the contract. */
+function setupHint(puzzle, remaining) {
+  const piece = pieceName(state.tray.find((t) => !t.square)?.type);
+  let hint;
+  if (puzzle.placement?.allowed) {
+    hint = `Place your ${piece} on one of the ${puzzle.placement.allowed.length} highlighted squares.`;
+  } else if (puzzle.placement?.blocked) {
+    hint = `Place your ${piece} anywhere except the ✕ squares — those win too obviously.`;
+  } else if (puzzle.place.length > 1) {
+    hint = `Place ${remaining} more piece${remaining > 1 ? 's' : ''}. Click a placed piece to pick it back up.`;
+  } else {
+    hint = `Place your ${piece} anywhere.`;
+  }
+  if (puzzle.solutions) {
+    hint += puzzle.solutions.length === 1
+      ? ' Exactly one placement wins.'
+      : ` ${puzzle.solutions.length} placements win.`;
+  }
+  if (puzzle.firstMove === 'opponent') hint += ' Careful: your opponent moves first!';
+  return hint;
 }
 
 function renderTray() {
@@ -318,7 +273,6 @@ function renderTray() {
 
 function handleSquareClick(square) {
   if (state.phase !== 'setup') return;
-  // Picking a placed piece back up
   const placedIdx = state.tray.findIndex((t) => t.square === square);
   if (placedIdx >= 0 && state.selectedTray === -1) {
     state.tray[placedIdx].square = null;
@@ -332,28 +286,16 @@ function handleSquareClick(square) {
 function placeSelected(square) {
   const item = state.tray[state.selectedTray];
   if (!item || state.phase !== 'setup') return;
-  if (usingCandidates() && !state.puzzle.candidates.includes(square)) {
-    setStatus('This puzzle only allows the highlighted squares.', true);
-    return;
-  }
-  if (usingExclusions() && activeExclusions().includes(square)) {
-    setStatus('That square is blocked — it wins too obviously. Find the hidden winning square.', true);
-    return;
-  }
-  if (currentMap()[square]) {
-    setStatus('That square is occupied — pick an empty one.', true);
-    return;
-  }
-  if (item.type === 'p' && (rankOf(square) === 1 || rankOf(square) === 8)) {
-    setStatus('Pawns can’t stand on the first or last rank.', true);
+  const error = placementError(state.puzzle, square, item.type, currentMap());
+  if (error) {
+    setStatus(error, true);
     return;
   }
   item.square = square;
   state.selectedTray = -1;
   refreshSetup();
   board.dropIn(square);
-  // Flag the offending piece if the position became illegal.
-  if (state.tray.every((t) => t.square) && validatePosition()) {
+  if (allPlaced() && startPositionError(state.puzzle, placements())) {
     board.highlight(square, 'bad');
   }
 }
@@ -373,7 +315,7 @@ function resetPlacements() {
 // ---- Playout phase ----
 
 async function play() {
-  const error = validatePosition();
+  const error = startPositionError(state.puzzle, placements());
   if (error) { setStatus(error, true); return; }
 
   const runId = ++state.runId;
@@ -389,30 +331,25 @@ async function play() {
   els.progress.classList.remove('hidden');
   board.clearHighlights('hint', 'bad', 'selected', 'option', 'excluded');
 
-  const startFen = currentFen();
-  const game = new Chess(startFen);
+  const fen = startFen(state.puzzle, placements());
+  const game = new Chess(fen);
   const uciMoves = []; // full history so the engines can see repetitions
   let plies = 0;
 
   const queue = [];
   let producerDone = false;
 
-  // Preferred path: a precomputed line ships with the puzzle, so the whole
-  // game is known instantly and no engine runs at all.
-  let line = lineForPlacement();
+  // Preferred path: a precomputed line ships with the puzzle.
+  let line = lineFor(state.puzzle, placements());
   if (line) {
     try {
       const moves = line.m.split(' ');
       const evals = line.e.split(' ').map(Number);
       for (let i = 0; i < moves.length; i++) {
         const uci = moves[i];
-        const played = game.move({
-          from: uci.slice(0, 2),
-          to: uci.slice(2, 4),
-          promotion: uci[4],
-        });
+        const playedMove = game.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] });
         queue.push({
-          played,
+          played: playedMove,
           fen: game.fen(),
           moveNo: Number(game.fen().split(' ')[5]),
           whiteCp: evals[i] ?? 0,
@@ -423,15 +360,12 @@ async function play() {
       console.warn('Stored line failed to replay; falling back to live engines.', err);
       line = null;
       queue.length = 0;
-      game.load(startFen);
+      game.load(fen);
     }
   }
 
   if (!line) {
-    // Live path: the engines fill the move buffer as fast as they can
-    // think — starting during the reveal, so the display never starts dry.
-    // Let any in-flight base-position eval finish first so its bestmove
-    // can't be mistaken for the playout's.
+    // Live path: the engines fill the buffer as fast as they can think.
     if (state.baseEvalSearch) {
       await state.baseEvalSearch.catch(() => {});
       state.baseEvalSearch = null;
@@ -444,17 +378,13 @@ async function play() {
         while (!game.isGameOver()) {
           const side = game.turn();
           const engine = side === 'w' ? whiteEngine : blackEngine;
-          const { move, score } = await engine.search(startFen, MOVETIME_MS, uciMoves);
+          const { move, score } = await engine.search(fen, MOVETIME_MS, uciMoves);
           if (runId !== state.runId) return;
           if (!move || move === '(none)') break;
-          const played = game.move({
-            from: move.slice(0, 2),
-            to: move.slice(2, 4),
-            promotion: move[4],
-          });
+          const playedMove = game.move({ from: move.slice(0, 2), to: move.slice(2, 4), promotion: move[4] });
           uciMoves.push(move);
           queue.push({
-            played,
+            played: playedMove,
             fen: game.fen(),
             moveNo: Number(game.fen().split(' ')[5]),
             whiteCp: scoreToWhiteCp(score, side),
@@ -466,13 +396,11 @@ async function play() {
     })();
   }
 
-  // Verdict reveal (~1s) while the buffer fills.
   await playReveal();
   if (runId !== state.runId) return;
   setStatus('Engines are playing… ♜ vs ♜');
 
-  // Consumer: drain the buffer at the user's pace, independent of how fast
-  // the engines happen to be thinking.
+  // Consumer: drain the buffer at the user's pace.
   while (true) {
     if (!queue.length) {
       if (producerDone) break;
@@ -482,21 +410,20 @@ async function play() {
     }
     const item = queue.shift();
     const stepStart = performance.now();
-    const { played } = item;
+    const { played: mv } = item;
     plies++;
 
     setEvalBar(item.whiteCp);
     board.clearHighlights('last-move');
-    board.highlight(played.from, 'last-move');
-    board.highlight(played.to, 'last-move');
-    // Castling slides the rook along with the king.
-    const slides = [{ from: played.from, to: played.to }];
-    const homeRank = played.color === 'w' ? 1 : 8;
-    if (played.flags.includes('k')) slides.push({ from: `h${homeRank}`, to: `f${homeRank}` });
-    if (played.flags.includes('q')) slides.push({ from: `a${homeRank}`, to: `d${homeRank}` });
+    board.highlight(mv.from, 'last-move');
+    board.highlight(mv.to, 'last-move');
+    const slides = [{ from: mv.from, to: mv.to }];
+    const homeRank = mv.color === 'w' ? 1 : 8;
+    if (mv.flags.includes('k')) slides.push({ from: `h${homeRank}`, to: `f${homeRank}` });
+    if (mv.flags.includes('q')) slides.push({ from: `a${homeRank}`, to: `d${homeRank}` });
     await board.animateMoves(slides, fenToMap(item.fen), moveAnimMs());
     if (runId !== state.runId) return;
-    appendMove(played, item.moveNo);
+    appendMove(mv, item.moveNo);
     els.progress.textContent = `Move ${Math.ceil(plies / 2)}`;
 
     const rest = movePaceMs() - (performance.now() - stepStart);
@@ -510,56 +437,35 @@ async function play() {
   finish(game);
 }
 
-/**
- * Which way is this placement going to go? Known ahead of time for generated
- * puzzles (the engines verified every square); unknown for the classics.
- * @returns {'win'|'loss'|null}
- */
-function knownVerdict() {
-  const placed = state.tray.find((t) => t.square)?.square;
-  if (!placed) return null;
-  const p = state.puzzle;
-  if (usingCandidates()) return placed === p.solution ? 'win' : 'loss';
-  if (state.proto === 2 && p.excluded) return placed === p.solution ? 'win' : 'loss';
-  if (state.proto === 3 && p.p3) return placed === p.p3.solution ? 'win' : 'loss';
-  if (usingP4()) return openSetData().solutions.includes(placed) ? 'win' : 'loss';
-  return null;
-}
-
 /** The ~1s win/loss reveal on the placed piece; doubles as buffer-fill time. */
 async function playReveal() {
-  const placed = state.tray.find((t) => t.square)?.square;
-  const verdict = knownVerdict();
-  if (verdict === 'win' && placed) {
+  const verdict = allPlaced() ? expectedVerdict(state.puzzle, placements()) : null;
+  const square = placements()[0]?.square;
+  if (verdict === 'win' && square) {
     setStatus('Direct hit! Now watch it play out…');
-    await board.revealWin(placed);
-  } else if (verdict === 'loss' && placed) {
-    setStatus('That square doesn’t win… watch what happens.', true);
-    await board.revealLoss(placed);
+    await board.revealWin(square);
+  } else if (verdict === 'loss' && square) {
+    setStatus('That placement doesn’t win… watch what happens.', true);
+    await board.revealLoss(square);
   } else {
-    // Classics: no verdict data — a short pause still primes the buffer.
+    // No verdict data — a short pause still primes the buffer.
     await sleep(600);
   }
 }
 
-function appendMove(played, fenMoveNo) {
-  // The fullmove counter increments after Black's move, so the FEN taken
-  // after the move reads N for White's move and N+1 for Black's.
-  const moveNo = played.color === 'w' ? fenMoveNo : fenMoveNo - 1;
+function appendMove(mv, fenMoveNo) {
+  const moveNo = mv.color === 'w' ? fenMoveNo : fenMoveNo - 1;
   const last = els.movelist.lastElementChild;
-  if (played.color === 'b' && last && Number(last.value) === moveNo && !last.dataset.complete) {
-    // Black's reply joins White's move on the same row.
-    last.textContent += `  ${played.san}`;
+  if (mv.color === 'b' && last && Number(last.value) === moveNo && !last.dataset.complete) {
+    last.textContent += `  ${mv.san}`;
     last.dataset.complete = '1';
   } else {
     const li = document.createElement('li');
     li.value = moveNo;
-    li.textContent = played.color === 'w' ? played.san : `… ${played.san}`;
-    if (played.color === 'b') li.dataset.complete = '1';
+    li.textContent = mv.color === 'w' ? mv.san : `… ${mv.san}`;
+    if (mv.color === 'b') li.dataset.complete = '1';
     els.movelist.appendChild(li);
   }
-  // Keep the newest move visible by scrolling the list itself — never the
-  // page (scrollIntoView yanked the viewport down on mobile).
   els.movelist.scrollTop = els.movelist.scrollHeight;
 }
 
@@ -572,9 +478,8 @@ function finish(game) {
   if (game.isCheckmate()) {
     const winner = game.turn() === 'w' ? 'b' : 'w';
     win = winner === player;
-    if (win && knownVerdict() === 'loss') {
-      // The reveal called this square a loss, but the live playout won:
-      // the player out-did the precomputed analysis.
+    const verdict = allPlaced() ? expectedVerdict(state.puzzle, placements()) : null;
+    if (win && verdict === 'loss') {
       title = 'Unbelievable — you win! 🤯🏆';
       detail = 'You found a winning line outside of the precalculated solutions — ' +
         `${playerName} delivered mate anyway. Take a bow.`;
@@ -593,12 +498,11 @@ function finish(game) {
   }
 
   state.phase = 'done';
+  markPlayed(state.puzzle.id);
   els.banner.className = `banner ${win ? 'win' : 'loss'}`;
   els.banner.innerHTML = '';
   els.banner.appendChild(win ? buildConfettiRain() : buildWaves());
   const h2 = document.createElement('h2');
-  // Letters animate in one by one, grouped into unbreakable words so the
-  // title never wraps mid-word on narrow screens.
   let i = 0;
   for (const word of title.split(' ')) {
     const wordSpan = document.createElement('span');
@@ -612,18 +516,39 @@ function finish(game) {
       i++;
     }
     h2.append(wordSpan, ' ');
-    i++; // count the space so the stagger rhythm carries across words
+    i++;
   }
   const p = document.createElement('p');
   p.textContent = detail;
-  els.banner.append(h2, p);
+  els.banner.append(h2, p, buildRatingRow());
 
   els.stopBtn.classList.add('hidden');
   els.retryBtn.classList.remove('hidden');
-  // Reset stays hidden until the player is back in the setup phase.
   setStatus(win
     ? 'You built a winning position. Try the next puzzle!'
     : 'Adjust your piece placement and try again.', !win);
+}
+
+/** 👍/👎 row on the results banner — the fun-research feedback signal. */
+function buildRatingRow() {
+  const row = document.createElement('div');
+  row.className = 'rating-row';
+  const label = document.createElement('span');
+  label.textContent = 'Fun puzzle?';
+  row.appendChild(label);
+  for (const [value, glyph] of [[1, '👍'], [-1, '👎']]) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = glyph;
+    btn.classList.toggle('active', ratings[state.puzzle.id] === value);
+    btn.addEventListener('click', () => {
+      ratePuzzle(state.puzzle.id, value);
+      for (const b of row.querySelectorAll('button')) b.classList.remove('active');
+      if (ratings[state.puzzle.id] === value) btn.classList.add('active');
+    });
+    row.appendChild(btn);
+  }
+  return row;
 }
 
 /** Gentle confetti rain over the whole board for the win banner. */
@@ -668,7 +593,7 @@ function drawReason(game) {
 function stopPlayout() {
   whiteEngine.stop();
   blackEngine.stop();
-  resetPlacements(); // stopping also resets the board in one press
+  resetPlacements();
   setStatus('Playout stopped and board reset. Place your pieces and try again.');
 }
 
@@ -689,7 +614,6 @@ function setStatus(text, isError = false) {
 }
 
 function setEvalBar(whiteCp) {
-  // Sigmoid squashing of centipawns into a 0–100% white share.
   const share = 100 / (1 + Math.exp(-whiteCp / 350));
   els.evalFill.style.height = `${share}%`;
 }
@@ -698,47 +622,62 @@ function pieceName(type) {
   return { k: 'king', q: 'queen', r: 'rook', b: 'bishop', n: 'knight', p: 'pawn' }[type];
 }
 
-// ---- Wiring ----
+// ---- Collections & wiring ----
 
-function setPrototype(proto) {
-  state.proto = proto;
-  localStorage.setItem('chessauto-proto', String(proto));
-  for (const btn of document.querySelectorAll('#proto-switch button')) {
-    btn.classList.toggle('active', Number(btn.dataset.proto) === proto);
-  }
-  activePuzzles = puzzlesForProto(proto);
-  els.puzzleSelect.innerHTML = '';
-  activePuzzles.forEach((p, i) => {
+function renderCollectionOptions() {
+  const current = els.collectionSelect.value;
+  els.collectionSelect.innerHTML = '';
+  COLLECTIONS.forEach((collection, i) => {
+    const fresh = collection.puzzles.filter((p) => !played.has(p.id)).length;
+    const date = new Date(collection.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
     const opt = document.createElement('option');
     opt.value = String(i);
-    opt.textContent = `${i + 1}. ${p.name} (${p.player === 'w' ? 'White' : 'Black'})`;
+    opt.textContent = `${collection.label} — ${date}${fresh ? ` (${fresh} new)` : ''}`;
+    els.collectionSelect.appendChild(opt);
+  });
+  els.collectionSelect.value = current !== '' && Number(current) < COLLECTIONS.length ? current : String(state.collection);
+}
+
+function renderPuzzleOptions() {
+  const current = els.puzzleSelect.value;
+  els.puzzleSelect.innerHTML = '';
+  activePuzzles().forEach((p, i) => {
+    const opt = document.createElement('option');
+    opt.value = String(i);
+    opt.textContent = `${i + 1}. ${p.name}${played.has(p.id) ? '' : ' •'}`;
     els.puzzleSelect.appendChild(opt);
   });
+  if (current !== '' && Number(current) < activePuzzles().length) els.puzzleSelect.value = current;
+}
+
+function setCollection(index) {
+  state.collection = index;
+  els.collectionSelect.value = String(index);
+  renderPuzzleOptions();
   loadPuzzle(0);
 }
 
-for (const btn of document.querySelectorAll('#proto-switch button')) {
-  btn.addEventListener('click', () => setPrototype(Number(btn.dataset.proto)));
-}
+els.collectionSelect.addEventListener('change', () => setCollection(Number(els.collectionSelect.value)));
+els.puzzleSelect.addEventListener('change', () => loadPuzzle(Number(els.puzzleSelect.value)));
+els.prevPuzzle.addEventListener('click', () => {
+  loadPuzzle((Number(els.puzzleSelect.value) + activePuzzles().length - 1) % activePuzzles().length);
+});
+els.nextPuzzle.addEventListener('click', () => {
+  loadPuzzle((Number(els.puzzleSelect.value) + 1) % activePuzzles().length);
+});
+els.playBtn.addEventListener('click', play);
+els.stopBtn.addEventListener('click', stopPlayout);
+els.retryBtn.addEventListener('click', backToSetup);
+els.resetBtn.addEventListener('click', resetPlacements);
 els.speedSlider.value = localStorage.getItem('chessauto-speed') || String(DEFAULT_ANIM_MS);
 els.speedValue.textContent = `${els.speedSlider.value} ms`;
 els.speedSlider.addEventListener('input', () => {
   els.speedValue.textContent = `${els.speedSlider.value} ms`;
   localStorage.setItem('chessauto-speed', els.speedSlider.value);
 });
-els.puzzleSelect.addEventListener('change', () => loadPuzzle(Number(els.puzzleSelect.value)));
-els.prevPuzzle.addEventListener('click', () => {
-  loadPuzzle((Number(els.puzzleSelect.value) + activePuzzles.length - 1) % activePuzzles.length);
-});
-els.nextPuzzle.addEventListener('click', () => {
-  loadPuzzle((Number(els.puzzleSelect.value) + 1) % activePuzzles.length);
-});
-els.playBtn.addEventListener('click', play);
-els.stopBtn.addEventListener('click', stopPlayout);
-els.retryBtn.addEventListener('click', backToSetup);
-els.resetBtn.addEventListener('click', resetPlacements);
 
-setPrototype(state.proto);
+renderCollectionOptions();
+setCollection(0); // newest batch is always the default view
 
 Promise.all([whiteEngine.init(), blackEngine.init()])
   .then(() => {
