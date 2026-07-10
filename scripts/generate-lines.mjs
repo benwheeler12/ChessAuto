@@ -126,11 +126,14 @@ const opt = (name, dflt) => {
 };
 const FILE = opt('file', 'src/generated-puzzles.js');
 const WORKERS = Number(opt('workers', 3));
+// --only p5-4,p5-5 bakes just those puzzles (for incremental, resumable runs)
+const ONLY = opt('only', null)?.split(',') ?? null;
 
 const puzzles = loadPuzzles(FILE);
 const jobs = [];
 
 for (const puzzle of puzzles) {
+  if (ONLY && !ONLY.includes(puzzle.id)) continue;
   const map = fenToMap(puzzle.fen);
   const player = puzzle.player;
   const opponent = player === 'w' ? 'b' : 'w';
@@ -202,6 +205,7 @@ rmSync(tmp, { recursive: true, force: true });
 // Merge results into puzzles, self-healing verdict mismatches.
 let mismatches = 0;
 for (const puzzle of puzzles) {
+  if (ONLY && !ONLY.includes(puzzle.id)) continue; // keep other puzzles' baked lines intact
   puzzle.lines = {};
   for (const [key, r] of results) {
     const [id, mode, sq] = key.split('|');
