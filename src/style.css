@@ -457,8 +457,14 @@ button.lichess-btn {
   background: transparent;
   color: var(--muted);
   border: 1px solid var(--panel-2);
-  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.45rem 0.55rem;
+  margin-left: auto; /* park the icon at the right edge of the row */
 }
+button.lichess-btn svg { width: 1.15rem; height: 1.15rem; display: block; }
+button.lichess-btn .ext-arrow { font-size: 0.72rem; line-height: 1; }
 button.lichess-btn:hover { color: var(--text); border-color: var(--muted); }
 
 .progress { font-size: 0.85rem; color: var(--muted); }
