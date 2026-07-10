@@ -71,6 +71,7 @@ function puzzlesForProto(proto) {
   if (proto === 2) return PUZZLES.filter((p) => p.excluded);
   if (proto === 3) return PUZZLES.filter((p) => p.p3);
   if (proto === 4) return PUZZLES.filter((p) => p.p4);
+  if (proto === 5) return PUZZLES.filter((p) => p.p5);
   return PUZZLES.filter((p) => p.candidates || !p.source);
 }
 
@@ -91,12 +92,23 @@ function activeExclusions() {
   return null; // prototype 4 blocks nothing
 }
 
-/** Prototype 4: open placement, opponent first, nothing blocked. */
-function usingP4() {
-  return state.proto === 4 && Boolean(state.puzzle.p4);
+/**
+ * Open-board data for the active prototype: P4 and P5 share identical rules
+ * (place anywhere, opponent moves first, at most two winning squares) and
+ * differ only in how their puzzle sets were discovered.
+ */
+function openSetData() {
+  if (state.proto === 4 && state.puzzle.p4) return state.puzzle.p4;
+  if (state.proto === 5 && state.puzzle.p5) return state.puzzle.p5;
+  return null;
 }
 
-/** Prototypes 3 and 4 flip the side to move: the opponent replies first. */
+/** Prototype 4/5: open placement, opponent first, nothing blocked. */
+function usingP4() {
+  return Boolean(openSetData());
+}
+
+/** Prototypes 3-5 flip the side to move: the opponent replies first. */
 function currentTurn() {
   const baseTurn = state.puzzle.fen.split(' ')[1];
   if ((state.proto === 3 && state.puzzle.p3) || usingP4()) {
@@ -472,7 +484,7 @@ function knownVerdict() {
   if (usingCandidates()) return placed === p.solution ? 'win' : 'loss';
   if (state.proto === 2 && p.excluded) return placed === p.solution ? 'win' : 'loss';
   if (state.proto === 3 && p.p3) return placed === p.p3.solution ? 'win' : 'loss';
-  if (usingP4()) return p.p4.solutions.includes(placed) ? 'win' : 'loss';
+  if (usingP4()) return openSetData().solutions.includes(placed) ? 'win' : 'loss';
   return null;
 }
 

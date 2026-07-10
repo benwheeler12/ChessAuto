@@ -17,6 +17,7 @@
 // follow as a sandbox.
 
 import GENERATED from './generated-puzzles.js';
+import GENERATED_P5 from './generated-puzzles-p5.js';
 
 const CLASSICS = [
   {
@@ -100,4 +101,4 @@ const CLASSICS = [
   },
 ];
 
-export const PUZZLES = [...GENERATED, ...CLASSICS];
+export const PUZZLES = [...GENERATED, ...GENERATED_P5, ...CLASSICS];

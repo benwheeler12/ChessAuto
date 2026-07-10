@@ -29,7 +29,7 @@ for (const puzzle of PUZZLES) {
     if (kings.length !== 1 || kings[0].color === puzzle.player) {
       fail(puzzle, 'king puzzle must be missing exactly the player’s king');
     }
-    if (!puzzle.p4) fail(puzzle, 'king puzzles only work in prototype 4');
+    if (!puzzle.p4 && !puzzle.p5) fail(puzzle, 'king puzzles only work in open-board prototypes (4/5)');
   } else {
     const check = validateFen(puzzle.fen);
     if (!check.ok) { fail(puzzle, `invalid FEN: ${check.error}`); continue; }
@@ -49,25 +49,26 @@ for (const puzzle of PUZZLES) {
     fail(puzzle, 'P3: player would start in check');
   }
 
-  // Prototype 4 data: 1-2 winning squares, all empty, opponent to move first.
-  if (puzzle.p4) {
+  // Prototype 4/5 data: 1-2 winning squares, all empty, opponent moves first.
+  for (const setKey of ['p4', 'p5']) {
+    if (!puzzle[setKey]) continue;
     const map = fenToMap(puzzle.fen);
-    const { solutions } = puzzle.p4;
+    const { solutions } = puzzle[setKey];
     if (!solutions?.length || solutions.length > 2) {
-      fail(puzzle, `P4: ${solutions?.length ?? 0} solutions (want 1-2)`);
+      fail(puzzle, `${setKey}: ${solutions?.length ?? 0} solutions (want 1-2)`);
     }
-    if (new Set(solutions).size !== solutions.length) fail(puzzle, 'P4: duplicate solutions');
+    if (new Set(solutions).size !== solutions.length) fail(puzzle, `${setKey}: duplicate solutions`);
     const opponent = puzzle.player === 'w' ? 'b' : 'w';
     for (const sq of solutions ?? []) {
-      if (!/^[a-h][1-8]$/.test(sq)) { fail(puzzle, `P4: bad solution square "${sq}"`); continue; }
-      if (map[sq]) { fail(puzzle, `P4: solution square ${sq} is occupied`); continue; }
+      if (!/^[a-h][1-8]$/.test(sq)) { fail(puzzle, `${setKey}: bad solution square "${sq}"`); continue; }
+      if (map[sq]) { fail(puzzle, `${setKey}: solution square ${sq} is occupied`); continue; }
       const placedFen = buildFen(
         { ...map, [sq]: { type: puzzle.place[0], color: puzzle.player } },
         opponent,
       );
-      if (!validateFen(placedFen).ok) fail(puzzle, `P4: placement on ${sq} is not a legal position`);
+      if (!validateFen(placedFen).ok) fail(puzzle, `${setKey}: placement on ${sq} is not a legal position`);
       else if (new Chess(flipTurn(placedFen)).isCheck()) {
-        fail(puzzle, `P4: placement on ${sq} leaves the player in check`);
+        fail(puzzle, `${setKey}: placement on ${sq} leaves the player in check`);
       }
     }
   }
@@ -138,14 +139,15 @@ for (const puzzle of PUZZLES) {
   if (!puzzle.lines) continue;
   for (const [mode, bySquare] of Object.entries(puzzle.lines)) {
     const turn = mode === 'own' ? puzzle.player : puzzle.player === 'w' ? 'b' : 'w';
+    const openSet = puzzle.p4 ?? puzzle.p5;
     const winners = mode === 'own'
       ? [puzzle.solution].filter(Boolean)
-      : puzzle.p4 ? puzzle.p4.solutions : [puzzle.p3?.solution].filter(Boolean);
+      : openSet ? openSet.solutions : [puzzle.p3?.solution].filter(Boolean);
     // Squares the player can actually reach in this mode; lines for blocked
     // squares (e.g. added to exclusions by self-healing) are inert.
     const blocked = mode === 'own'
       ? puzzle.excluded ?? []
-      : puzzle.p4 ? [] : puzzle.p3?.excluded ?? [];
+      : openSet ? [] : puzzle.p3?.excluded ?? [];
     for (const [sq, line] of Object.entries(bySquare)) {
       if (blocked.includes(sq)) continue;
       lineCount++;
