@@ -135,12 +135,12 @@ main {
   overflow: visible;
 }
 .board .zone-layer .zone {
-  fill: rgba(149, 187, 74, 0.08);
-  stroke: var(--accent-2);
-  stroke-width: 3px;
+  fill: rgba(255, 152, 32, 0.10);
+  stroke: #ff9820;
+  stroke-width: 3.5px;
   vector-effect: non-scaling-stroke;
   stroke-linejoin: round;
-  filter: drop-shadow(0 0 6px rgba(149, 187, 74, 0.6));
+  filter: drop-shadow(0 0 7px rgba(255, 152, 32, 0.75));
   animation: zone-breathe 2.6s ease-in-out infinite;
 }
 @keyframes zone-breathe {
