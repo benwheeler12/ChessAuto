@@ -214,6 +214,8 @@ function refreshSetup() {
   els.playBtn.classList.remove('hidden');
   els.stopBtn.classList.add('hidden');
   els.retryBtn.classList.add('hidden');
+  // Reset only exists while placing pieces.
+  els.resetBtn.classList.remove('hidden');
   els.resetBtn.disabled = false;
   els.trayLabel.classList.remove('hidden');
   els.tray.classList.remove('hidden');
@@ -335,7 +337,7 @@ async function play() {
   els.playBtn.classList.add('hidden');
   els.stopBtn.classList.remove('hidden');
   els.retryBtn.classList.add('hidden');
-  els.resetBtn.disabled = true;
+  els.resetBtn.classList.add('hidden'); // during playout, Stop is the only control
   els.trayLabel.classList.add('hidden');
   els.tray.classList.add('hidden');
   els.movelist.innerHTML = '';
@@ -560,7 +562,7 @@ function finish(game) {
 
   els.stopBtn.classList.add('hidden');
   els.retryBtn.classList.remove('hidden');
-  els.resetBtn.disabled = false;
+  // Reset stays hidden until the player is back in the setup phase.
   setStatus(win
     ? 'You built a winning position. Try the next puzzle!'
     : 'Adjust your piece placement and try again.', !win);
