@@ -534,10 +534,18 @@ function finish(game) {
   if (game.isCheckmate()) {
     const winner = game.turn() === 'w' ? 'b' : 'w';
     win = winner === player;
-    title = win ? 'Checkmate — you win! 🏆' : 'Checkmate — you lose';
-    detail = win
-      ? `Your construction was lethal: ${playerName} delivered mate.`
-      : `Your position collapsed and ${winner === 'w' ? 'White' : 'Black'} delivered mate.`;
+    if (win && knownVerdict() === 'loss') {
+      // The reveal called this square a loss, but the live playout won:
+      // the player out-did the precomputed analysis.
+      title = 'Unbelievable — you win! 🤯🏆';
+      detail = 'You found a winning line outside of the precalculated solutions — ' +
+        `${playerName} delivered mate anyway. Take a bow.`;
+    } else {
+      title = win ? 'Checkmate — you win! 🏆' : 'Checkmate — you lose';
+      detail = win
+        ? `Your construction was lethal: ${playerName} delivered mate.`
+        : `Your position collapsed and ${winner === 'w' ? 'White' : 'Black'} delivered mate.`;
+    }
   } else if (game.isDraw()) {
     title = 'Drawn — not a win';
     detail = drawReason(game) + ' A draw doesn’t count: the position has to actually win.';
