@@ -437,16 +437,16 @@ async function play() {
   finish(game);
 }
 
-/** The ~1s win/loss reveal on the placed piece; doubles as buffer-fill time. */
+/** The ~1s win/loss reveal on the placed piece(s); doubles as buffer-fill time. */
 async function playReveal() {
   const verdict = allPlaced() ? expectedVerdict(state.puzzle, placements()) : null;
-  const square = placements()[0]?.square;
-  if (verdict === 'win' && square) {
+  const squares = placements().map((p) => p.square);
+  if (verdict === 'win' && squares.length) {
     setStatus('Direct hit! Now watch it play out…');
-    await board.revealWin(square);
-  } else if (verdict === 'loss' && square) {
+    await board.revealWin(squares);
+  } else if (verdict === 'loss' && squares.length) {
     setStatus('That placement doesn’t win… watch what happens.', true);
-    await board.revealLoss(square);
+    await board.revealLoss(squares);
   } else {
     // No verdict data — a short pause still primes the buffer.
     await sleep(600);
