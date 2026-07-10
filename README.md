@@ -109,6 +109,20 @@ runtime for generated puzzles (the engines still load in the background for
 the free-placement classics), the pace is fully controlled by the speed
 slider, and results are deterministic.
 
+## Puzzle lab (feature analysis)
+
+Groundwork for discovering what makes positions *fun* as puzzles:
+
+- `npm run fetch:games` streams a monthly Lichess database dump and keeps the
+  first N games passing quality filters (default: both players ≥2300,
+  blitz-or-slower, decisive) — typically a few MB of a ~30 GB file.
+- `npm run analyze` samples positions from a PGN and computes cheap static
+  features (~3ms/position, no engine): material, tension, hanging pieces,
+  pins, king-safety geometry, mobility, passed pawns, checks/captures
+  available. Outputs `data/features.jsonl` plus `data/feature-outliers.md`,
+  which lists the extreme positions per feature with Lichess analysis links
+  for manual fun-testing.
+
 ## Credits
 
 Piece graphics are the classic
