@@ -4,31 +4,24 @@
 //
 // Selection: top N positions per heuristic (max 2 per game, deduped across
 // heuristics). Each puzzle records which heuristics discovered it, so
-// playtest feedback maps back to features.
+// playtest feedback maps back to features. Qualification runs across
+// parallel worker processes; --append preserves puzzles already in the
+// output file and skips their source positions.
 //
 // Usage: node scripts/generate-p5.mjs [--features data/features.jsonl]
-//   [--pgn data/lichess-games.pgn] [--top 3] [--out src/generated-puzzles-p5.js]
+//   [--pgn data/lichess-games.pgn] [--top 3] [--workers 3] [--append]
+//   [--out src/generated-puzzles-p5.js]
+// (Internal: --worker <jobsFile> <outFile> runs a batch in a child process.)
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fork } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { Chess, validateFen } from 'chess.js';
 import { fenToMap, buildFen } from '../src/fen.js';
 
-const require = createRequire(import.meta.url);
-
-const opt = (name, dflt) => {
-  const i = process.argv.indexOf(`--${name}`);
-  return i >= 0 ? process.argv[i + 1] : dflt;
-};
-const FEATURES_FILE = opt('features', 'data/features.jsonl');
-const PGN_FILE = opt('pgn', 'data/lichess-games.pgn');
-const TOP_N = Number(opt('top', 3));
-const OUT = opt('out', 'src/generated-puzzles-p5.js');
-
-const HEURISTICS = [
-  'hangingTotal', 'tension', 'contacts', 'pinsTotal', 'ringAttackMax',
-  'checksStm', 'capturesStm', 'mobilityGap', 'maxPasserAdvance', 'phase',
-];
 const SHALLOW_MS = 80;
 const DEEP_MS = 700;
 const WIN_CP = 300;
@@ -44,38 +37,13 @@ const PIECE_VARIANTS = [
   ['n', 'b', 'p', 'q', 'r', 'k'],
 ];
 const PIECE_NAMES = { q: 'queen', r: 'rook', b: 'bishop', n: 'knight', p: 'pawn', k: 'king' };
+const HEURISTICS = [
+  'hangingTotal', 'tension', 'contacts', 'pinsTotal', 'ringAttackMax',
+  'checksStm', 'capturesStm', 'mobilityGap', 'maxPasserAdvance', 'phase',
+];
 const FILES = 'abcdefgh';
 const ALL_SQUARES = [];
 for (let r = 1; r <= 8; r++) for (const f of FILES) ALL_SQUARES.push(f + r);
-
-// ---- Engine ----
-const init = require('stockfish');
-const engine = await init('lite-single');
-const listeners = new Set();
-engine.listener = (line) => { for (const l of [...listeners]) l(line); };
-const command = (cmd, until) => new Promise((resolve) => {
-  const l = (line) => { if (until(line)) { listeners.delete(l); resolve(line); } };
-  listeners.add(l);
-  engine.sendCommand(cmd);
-});
-await command('uci', (l) => l === 'uciok');
-engine.sendCommand('setoption name Hash value 64');
-await command('isready', (l) => l === 'readyok');
-
-async function evaluate(fen, movetime) {
-  let score = 0;
-  engine.sendCommand(`position fen ${fen}`);
-  await command(`go movetime ${movetime}`, (line) => {
-    const m = /score (cp|mate) (-?\d+)/.exec(line);
-    if (m) {
-      score = m[1] === 'mate'
-        ? Math.sign(Number(m[2])) * (10000 - Math.abs(Number(m[2])))
-        : Number(m[2]);
-    }
-    return line.startsWith('bestmove');
-  });
-  return score;
-}
 
 function isLegalStart(fen) {
   if (!validateFen(fen).ok) return false;
@@ -86,9 +54,165 @@ function isLegalStart(fen) {
   return !new Chess(fen).isGameOver();
 }
 
-// ---- Select outlier positions ----
+// ---------------------------------------------------------------- worker ---
+if (process.argv[2] === '--worker') {
+  const [jobsFile, outFile] = process.argv.slice(3);
+  const jobs = JSON.parse(readFileSync(jobsFile, 'utf8'));
+  const require = createRequire(import.meta.url);
+  const engine = await require('stockfish')('lite-single');
+  const listeners = new Set();
+  engine.listener = (line) => { for (const l of [...listeners]) l(line); };
+  const command = (cmd, until) => new Promise((resolve) => {
+    const l = (line) => { if (until(line)) { listeners.delete(l); resolve(line); } };
+    listeners.add(l);
+    engine.sendCommand(cmd);
+  });
+  await command('uci', (l) => l === 'uciok');
+  engine.sendCommand('setoption name Hash value 64');
+  await command('isready', (l) => l === 'readyok');
+
+  async function evaluate(fen, movetime) {
+    let score = 0;
+    engine.sendCommand(`position fen ${fen}`);
+    await command(`go movetime ${movetime}`, (line) => {
+      const m = /score (cp|mate) (-?\d+)/.exec(line);
+      if (m) {
+        score = m[1] === 'mate'
+          ? Math.sign(Number(m[2])) * (10000 - Math.abs(Number(m[2])))
+          : Number(m[2]);
+      }
+      return line.startsWith('bestmove');
+    });
+    return score;
+  }
+
+  /** Try to qualify one outlier position; returns a puzzle body or a log. */
+  async function qualify(job) {
+    const { row, foundBy, meta, variant } = job;
+    const player = row.fen.split(' ')[1];
+    const opponent = player === 'w' ? 'b' : 'w';
+    const map = fenToMap(row.fen);
+
+    const originCp = await evaluate(row.fen, SHALLOW_MS);
+    if (Math.abs(originCp) > ORIGIN_EVAL_LIMIT) {
+      return { log: `skip g${row.game} ply${row.ply}: origin ${originCp}cp (one-sided)` };
+    }
+
+    const prio = PIECE_VARIANTS[variant % PIECE_VARIANTS.length];
+    const sorted = Object.entries(map)
+      .filter(([, p]) => p.color === player && prio.includes(p.type))
+      .sort(([sqA, a], [sqB, b]) => {
+        const d = prio.indexOf(a.type) - prio.indexOf(b.type);
+        if (d) return d;
+        if (a.type === 'p') {
+          return player === 'w' ? Number(sqB[1]) - Number(sqA[1]) : Number(sqA[1]) - Number(sqB[1]);
+        }
+        return 0;
+      });
+    const firstOfType = [];
+    const extras = [];
+    const tried = new Set();
+    for (const entry of sorted) {
+      if (tried.has(entry[1].type)) extras.push(entry);
+      else { tried.add(entry[1].type); firstOfType.push(entry); }
+    }
+    const removable = [...firstOfType, ...extras].slice(0, 6);
+
+    const reasons = [];
+    for (const [origin, piece] of removable) {
+      const baseMap = { ...map };
+      delete baseMap[origin];
+      if (!isLegalStart(buildFen(baseMap, opponent)) && piece.type !== 'k') {
+        reasons.push(`${piece.type}@${origin}: illegal base`);
+        continue;
+      }
+      const scans = [];
+      for (const sq of ALL_SQUARES) {
+        if (baseMap[sq]) continue;
+        const fen = buildFen({ ...baseMap, [sq]: piece }, opponent);
+        if (!isLegalStart(fen)) continue;
+        const cpSide = await evaluate(fen, SHALLOW_MS);
+        scans.push({ sq, fen, cp: -cpSide }); // player perspective
+      }
+      const shallowWinners = scans.filter((s) => s.cp >= SHALLOW_WIN_CP).sort((a, b) => b.cp - a.cp);
+      if (!shallowWinners.length) { reasons.push(`${piece.type}@${origin}: no winning square`); continue; }
+      if (shallowWinners.length > MAX_SHALLOW_WINNERS) {
+        reasons.push(`${piece.type}@${origin}: ${shallowWinners.length} shallow winners`);
+        continue;
+      }
+      const deepBySq = new Map();
+      const deepEval = async (cand) => {
+        if (!deepBySq.has(cand.sq)) deepBySq.set(cand.sq, -(await evaluate(cand.fen, DEEP_MS)));
+        return deepBySq.get(cand.sq);
+      };
+      let winner = null;
+      for (const cand of shallowWinners.slice(0, 3)) {
+        const deep = await deepEval(cand);
+        if (deep >= WIN_CP) { winner = { ...cand, cp: deep }; break; }
+      }
+      if (!winner) { reasons.push(`${piece.type}@${origin}: no deep-verified winner`); continue; }
+      for (const cand of scans) {
+        if (cand.cp >= EXCLUDE_VERIFY_CP) await deepEval(cand);
+      }
+      const looseWins = [...deepBySq.entries()].filter(([, d]) => d >= EXCLUDE_CP).map(([sq]) => sq).sort();
+      if (looseWins.length > MAX_SOLUTIONS) {
+        reasons.push(`${piece.type}@${origin}: ${looseWins.length} winning squares`);
+        continue;
+      }
+
+      return {
+        puzzle: {
+          name: `${meta.white}–${meta.black} (Lichess)`,
+          description:
+            `From a Lichess game (${meta.site}), around move ${row.moveNo}. ` +
+            `Missing piece: a ${PIECE_NAMES[piece.type]}. Discovered by: ${foundBy.join(', ')}.`,
+          fen: buildFen(baseMap, player),
+          player,
+          place: [piece.type],
+          p5: { solutions: looseWins, winCp: winner.cp, foundBy },
+          source: {
+            white: meta.white, black: meta.black, event: 'Lichess', site: meta.site,
+            moveNumber: row.moveNo, ply: row.ply, removedFrom: origin,
+          },
+        },
+        log: `✓ g${row.game} ply${row.ply} remove ${piece.type.toUpperCase()} from ${origin} — ` +
+          `solutions [${looseWins.join(' ')}] (+${(winner.cp / 100).toFixed(1)}) — via ${foundBy.join(',')}`,
+      };
+    }
+    return { log: `✗ g${row.game} ply${row.ply} (${foundBy.join(',')}): ${reasons.join('; ') || 'no removable pieces'}` };
+  }
+
+  const results = [];
+  for (const [i, job] of jobs.entries()) {
+    const result = await qualify(job);
+    console.error(`  [worker ${i + 1}/${jobs.length}] ${result.log}`);
+    results.push({ order: job.order, puzzle: result.puzzle ?? null });
+  }
+  writeFileSync(outFile, JSON.stringify(results));
+  process.exit(0);
+}
+
+// ---------------------------------------------------------------- parent ---
+const opt = (name, dflt) => {
+  const i = process.argv.indexOf(`--${name}`);
+  return i >= 0 ? process.argv[i + 1] : dflt;
+};
+const FEATURES_FILE = opt('features', 'data/features.jsonl');
+const PGN_FILE = opt('pgn', 'data/lichess-games.pgn');
+const TOP_N = Number(opt('top', 3));
+const WORKERS = Number(opt('workers', 3));
+const OUT = opt('out', 'src/generated-puzzles-p5.js');
+const APPEND = process.argv.includes('--append');
+
+const existing = APPEND && existsSync(OUT)
+  ? JSON.parse(readFileSync(OUT, 'utf8').replace(/^\/\/.*\n/, '').replace(/^export default /, '').replace(/;\s*$/, ''))
+  : [];
+const covered = new Set(existing.map((p) => `${p.source?.site}|${p.source?.moveNumber}|${p.player}`));
+if (APPEND) console.error(`Appending: ${existing.length} existing puzzles preserved`);
+
+// Select the top-N outlier positions per heuristic.
 const rows = readFileSync(FEATURES_FILE, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-const selected = new Map(); // key game|ply -> { row, foundBy: [] }
+const selected = new Map();
 for (const feature of HEURISTICS) {
   const usable = rows.filter((r) => r[feature] != null).sort((a, b) => b[feature] - a[feature]);
   const perGame = new Map();
@@ -105,9 +229,7 @@ for (const feature of HEURISTICS) {
     selected.set(key, entry);
   }
 }
-console.error(`${selected.size} unique outlier positions selected (top ${TOP_N} × ${HEURISTICS.length} heuristics)`);
 
-// Player names per game index for puzzle naming
 const games = readFileSync(PGN_FILE, 'utf8').split(/\n\n(?=\[Event )/);
 const nameOf = (idx) => {
   const chunk = games[idx] ?? '';
@@ -115,116 +237,47 @@ const nameOf = (idx) => {
   return { white: get('White'), black: get('Black'), site: get('Site') };
 };
 
-// ---- Qualify each position under P4 rules (opponent moves first) ----
-const puzzles = [];
+const jobs = [];
 for (const { row, foundBy } of selected.values()) {
+  const meta = nameOf(row.game);
   const player = row.fen.split(' ')[1];
-  const opponent = player === 'w' ? 'b' : 'w';
-  const map = fenToMap(row.fen);
+  if (covered.has(`${meta.site}|${row.moveNo}|${player}`)) continue;
+  jobs.push({ order: jobs.length, row, foundBy, meta, variant: jobs.length });
+}
+console.error(`${selected.size} outliers selected → ${jobs.length} new positions to qualify on ${WORKERS} workers`);
 
-  const originCp = await evaluate(row.fen, SHALLOW_MS);
-  if (Math.abs(originCp) > ORIGIN_EVAL_LIMIT) {
-    console.error(`  skip g${row.game} ply${row.ply}: origin ${originCp}cp (one-sided)`);
-    continue;
-  }
+const tmp = mkdtempSync(join(tmpdir(), 'chessauto-p5-'));
+const self = fileURLToPath(import.meta.url);
+const batches = Array.from({ length: WORKERS }, () => []);
+jobs.forEach((job, i) => batches[i % WORKERS].push(job));
 
-  const prio = PIECE_VARIANTS[puzzles.length % PIECE_VARIANTS.length];
-  const sorted = Object.entries(map)
-    .filter(([, p]) => p.color === player && prio.includes(p.type))
-    .sort(([sqA, a], [sqB, b]) => {
-      const d = prio.indexOf(a.type) - prio.indexOf(b.type);
-      if (d) return d;
-      if (a.type === 'p') {
-        return player === 'w' ? Number(sqB[1]) - Number(sqA[1]) : Number(sqA[1]) - Number(sqB[1]);
-      }
-      return 0;
-    });
-  // Try up to 6 removals: every distinct type first, then second pieces of
-  // already-tried types (e.g. the other rook).
-  const firstOfType = [];
-  const extras = [];
-  const tried = new Set();
-  for (const entry of sorted) {
-    if (tried.has(entry[1].type)) extras.push(entry);
-    else { tried.add(entry[1].type); firstOfType.push(entry); }
-  }
-  const removable = [...firstOfType, ...extras].slice(0, 6);
+await Promise.all(batches.map((batch, i) => {
+  if (!batch.length) return Promise.resolve();
+  const jobsFile = join(tmp, `jobs-${i}.json`);
+  const outFile = join(tmp, `out-${i}.json`);
+  writeFileSync(jobsFile, JSON.stringify(batch));
+  return new Promise((resolve, reject) => {
+    const child = fork(self, ['--worker', jobsFile, outFile], { stdio: 'inherit' });
+    child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`worker ${i} exited ${code}`))));
+  });
+}));
 
-  let qualified = false;
-  const reasons = [];
-  for (const [origin, piece] of removable) {
-    const baseMap = { ...map };
-    delete baseMap[origin];
-    if (!isLegalStart(buildFen(baseMap, opponent)) && piece.type !== 'k') {
-      reasons.push(`${piece.type}@${origin}: illegal base`);
-      continue;
+const fresh = [];
+for (let i = 0; i < WORKERS; i++) {
+  try {
+    for (const r of JSON.parse(readFileSync(join(tmp, `out-${i}.json`), 'utf8'))) {
+      if (r.puzzle) fresh.push(r);
     }
+  } catch { /* empty batch */ }
+}
+rmSync(tmp, { recursive: true, force: true });
+fresh.sort((a, b) => a.order - b.order);
 
-    // Shallow scan of every legal placement with the opponent to move.
-    const scans = [];
-    for (const sq of ALL_SQUARES) {
-      if (baseMap[sq]) continue;
-      const fen = buildFen({ ...baseMap, [sq]: piece }, opponent);
-      if (!isLegalStart(fen)) continue;
-      const cpSide = await evaluate(fen, SHALLOW_MS);
-      scans.push({ sq, fen, cp: -cpSide }); // player perspective
-    }
-    const shallowWinners = scans.filter((s) => s.cp >= SHALLOW_WIN_CP).sort((a, b) => b.cp - a.cp);
-    if (!shallowWinners.length) { reasons.push(`${piece.type}@${origin}: no winning square`); continue; }
-    if (shallowWinners.length > MAX_SHALLOW_WINNERS) {
-      reasons.push(`${piece.type}@${origin}: ${shallowWinners.length} shallow winners`);
-      continue;
-    }
-
-    const deepBySq = new Map();
-    const deepEval = async (cand) => {
-      if (!deepBySq.has(cand.sq)) deepBySq.set(cand.sq, -(await evaluate(cand.fen, DEEP_MS)));
-      return deepBySq.get(cand.sq);
-    };
-    let winner = null;
-    for (const cand of shallowWinners.slice(0, 3)) {
-      const deep = await deepEval(cand);
-      if (deep >= WIN_CP) { winner = { ...cand, cp: deep }; break; }
-    }
-    if (!winner) { reasons.push(`${piece.type}@${origin}: no deep-verified winner`); continue; }
-    for (const cand of scans) {
-      if (cand.cp >= EXCLUDE_VERIFY_CP) await deepEval(cand);
-    }
-    const looseWins = [...deepBySq.entries()].filter(([, d]) => d >= EXCLUDE_CP).map(([sq]) => sq).sort();
-    if (looseWins.length > MAX_SOLUTIONS) {
-      reasons.push(`${piece.type}@${origin}: ${looseWins.length} winning squares`);
-      continue;
-    }
-
-    const meta = nameOf(row.game);
-    puzzles.push({
-      id: `p5-${puzzles.length + 1}`,
-      name: `${meta.white}–${meta.black} (Lichess)`,
-      description:
-        `From a ${row.fen.split(' ')[1] === 'w' ? '' : ''}Lichess game (${meta.site}), around move ${row.moveNo}. ` +
-        `Missing piece: a ${PIECE_NAMES[piece.type]}. Discovered by: ${foundBy.join(', ')}.`,
-      fen: buildFen(baseMap, player),
-      player,
-      place: [piece.type],
-      p5: { solutions: looseWins, winCp: winner.cp, foundBy },
-      source: {
-        white: meta.white, black: meta.black, event: 'Lichess', site: meta.site,
-        moveNumber: row.moveNo, removedFrom: origin,
-      },
-    });
-    console.error(
-      `  ✓ p5-${puzzles.length}: g${row.game} ply${row.ply} remove ${piece.type.toUpperCase()} from ${origin} — ` +
-      `solutions [${looseWins.join(' ')}] (+${(winner.cp / 100).toFixed(1)}) — via ${foundBy.join(',')}`,
-    );
-    qualified = true;
-    break; // one puzzle per position
-  }
-  if (!qualified && reasons.length) {
-    console.error(`  ✗ g${row.game} ply${row.ply} (${foundBy.join(',')}): ${reasons.join('; ')}`);
-  }
+const merged = [...existing];
+for (const { puzzle } of fresh) {
+  merged.push({ id: `p5-${merged.length + 1}`, ...puzzle });
 }
 
 const banner = '// Generated by scripts/generate-p5.mjs — do not edit by hand.\n';
-writeFileSync(OUT, `${banner}export default ${JSON.stringify(puzzles)};\n`);
-console.error(`\nWrote ${puzzles.length} P5 puzzles to ${OUT}`);
-process.exit(0);
+writeFileSync(OUT, `${banner}export default ${JSON.stringify(merged)};\n`);
+console.error(`\nWrote ${merged.length} P5 puzzles (${fresh.length} new) to ${OUT}`);
