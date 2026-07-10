@@ -11,6 +11,62 @@ export function pieceClass(color, type) {
   return `pc-${color}${type}`;
 }
 
+/**
+ * Trace the boundary of a set of unit cells (Set of "col,row" strings) into
+ * closed loops of [x, y] lattice points, clockwise in screen coordinates.
+ * Exported for tests.
+ */
+export function traceOutlines(cells) {
+  const has = (c, r) => cells.has(`${c},${r}`);
+  const edges = new Map(); // "x,y" of edge start -> [{from, to, used}]
+  const addEdge = (x1, y1, x2, y2) => {
+    const key = `${x1},${y1}`;
+    if (!edges.has(key)) edges.set(key, []);
+    edges.get(key).push({ from: [x1, y1], to: [x2, y2], used: false });
+  };
+  for (const key of cells) {
+    const [c, r] = key.split(',').map(Number);
+    if (!has(c, r - 1)) addEdge(c, r, c + 1, r); // top, left → right
+    if (!has(c + 1, r)) addEdge(c + 1, r, c + 1, r + 1); // right, down
+    if (!has(c, r + 1)) addEdge(c + 1, r + 1, c, r + 1); // bottom, right → left
+    if (!has(c - 1, r)) addEdge(c, r + 1, c, r); // left, up
+  }
+
+  const loops = [];
+  for (const list of edges.values()) {
+    for (const first of list) {
+      if (first.used) continue;
+      const points = [first.from];
+      let edge = first;
+      while (!edge.used) {
+        edge.used = true;
+        points.push(edge.to);
+        const dir = [edge.to[0] - edge.from[0], edge.to[1] - edge.from[1]];
+        const outs = (edges.get(`${edge.to[0]},${edge.to[1]}`) ?? []).filter((e) => !e.used);
+        if (!outs.length) break;
+        // At pinch points (two islands touching corners) prefer the sharpest
+        // clockwise turn so each loop stays on its own island.
+        outs.sort((a, b) => {
+          const cross = (e) => dir[0] * (e.to[1] - e.from[1]) - dir[1] * (e.to[0] - e.from[0]);
+          return cross(b) - cross(a);
+        });
+        edge = outs[0];
+      }
+      // Drop collinear midpoints and the duplicated closing point.
+      const clean = [];
+      for (let i = 0; i < points.length - 1; i++) {
+        const prev = points[(i + points.length - 2) % (points.length - 1)];
+        const next = points[i + 1];
+        if ((prev[0] === points[i][0] && points[i][0] === next[0])
+          || (prev[1] === points[i][1] && points[i][1] === next[1])) continue;
+        clean.push(points[i]);
+      }
+      loops.push(clean);
+    }
+  }
+  return loops;
+}
+
 export class Board {
   /**
    * @param {HTMLElement} el
@@ -54,31 +110,38 @@ export class Board {
   }
 
   /**
-   * Draw a rectangle outline around the zone spanned by two corner squares
-   * (any two opposite corners). Replaces any previous zone.
+   * Outline groups of squares on the board. Each island (an array of
+   * squares, e.g. [['d3','d4','e3'], ['g6']]) gets one traced border that
+   * hugs its exact shape. Replaces any previous zones.
    */
-  showZone(from, to) {
-    this.clearZone();
-    const disp = (sq) => {
-      const file = sq.charCodeAt(0) - 97;
-      const rank = Number(sq[1]);
-      return this.orientation === 'w'
-        ? { col: file, row: 8 - rank }
-        : { col: 7 - file, row: rank - 1 };
-    };
-    const a = disp(from);
-    const b = disp(to);
-    const zone = document.createElement('div');
-    zone.className = 'zone';
-    zone.style.left = `${Math.min(a.col, b.col) * 12.5}%`;
-    zone.style.top = `${Math.min(a.row, b.row) * 12.5}%`;
-    zone.style.width = `${(Math.abs(a.col - b.col) + 1) * 12.5}%`;
-    zone.style.height = `${(Math.abs(a.row - b.row) + 1) * 12.5}%`;
-    this.el.appendChild(zone);
-    this.zoneEl = zone;
+  showZones(islands) {
+    this.clearZones();
+    if (!islands?.length) return;
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 8 8');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.classList.add('zone-layer');
+    for (const island of islands) {
+      const cells = new Set(island.map((sq) => {
+        const file = sq.charCodeAt(0) - 97;
+        const rank = Number(sq[1]);
+        return this.orientation === 'w'
+          ? `${file},${8 - rank}`
+          : `${7 - file},${rank - 1}`;
+      }));
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.classList.add('zone');
+      path.setAttribute('fill-rule', 'evenodd');
+      path.setAttribute('d', traceOutlines(cells)
+        .map((loop) => `M ${loop.map(([x, y]) => `${x} ${y}`).join(' L ')} Z`)
+        .join(' '));
+      svg.appendChild(path);
+    }
+    this.el.appendChild(svg);
+    this.zoneEl = svg;
   }
 
-  clearZone() {
+  clearZones() {
     this.zoneEl?.remove();
     this.zoneEl = null;
   }

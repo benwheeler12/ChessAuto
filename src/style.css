@@ -117,31 +117,35 @@ main {
   cursor: pointer;
 }
 
-/* Candidate squares in generated puzzles (pick one of these) */
-.square.option {
-  background-image: radial-gradient(circle, rgba(20, 30, 15, 0.45) 24%, transparent 26%);
-  cursor: pointer;
-}
+/* Allowed squares: bordered islands mark where pieces may go; a hover dot
+   keeps the per-square click affordance. */
+.square.option { cursor: pointer; }
 .square.option:hover {
   background-image: radial-gradient(circle, rgba(255, 210, 77, 0.85) 30%, transparent 32%);
 }
 
-/* Rectangular placement zone (sector puzzles): one outlined region */
-.board .zone {
+/* Placement-zone outlines: one traced border per island of allowed squares */
+.board .zone-layer {
   position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
   z-index: 3;
-  border: 3px solid var(--accent-2);
-  border-radius: 8px;
-  box-shadow:
-    0 0 0 2px rgba(20, 30, 15, 0.35),
-    0 0 18px rgba(149, 187, 74, 0.55),
-    inset 0 0 14px rgba(149, 187, 74, 0.28);
+  overflow: visible;
+}
+.board .zone-layer .zone {
+  fill: rgba(149, 187, 74, 0.08);
+  stroke: var(--accent-2);
+  stroke-width: 3px;
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 6px rgba(149, 187, 74, 0.6));
   animation: zone-breathe 2.6s ease-in-out infinite;
 }
 @keyframes zone-breathe {
-  0%, 100% { box-shadow: 0 0 0 2px rgba(20, 30, 15, 0.35), 0 0 18px rgba(149, 187, 74, 0.55), inset 0 0 14px rgba(149, 187, 74, 0.28); }
-  50% { box-shadow: 0 0 0 2px rgba(20, 30, 15, 0.35), 0 0 8px rgba(149, 187, 74, 0.3), inset 0 0 6px rgba(149, 187, 74, 0.14); }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.72; }
 }
 
 /* Blocked squares in prototype 2 (too-obvious winning placements) */
