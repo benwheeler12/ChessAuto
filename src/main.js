@@ -15,7 +15,7 @@ const DEFAULT_ANIM_MS = 50; // piece-slide duration (user-adjustable via slider)
 
 // Phase 1 of a playout: the opening moves play slowly until the material
 // verdict is visible, then pause for ◀ ▶ review before the fast finish.
-const PHASE1_PACE_MS = 1100; // deliberate per-move pace for the opening
+const PHASE1_PACE_MS = 550; // brisk-but-visible pace for the opening sketch
 const PHASE1_ANIM_MS = 250; // minimum slide duration during phase 1
 // A side "holds the material advantage" at 2+ points. Phase 1 pauses when
 // that STATE changes hands (even → ahead, ahead → even, …) — not on raw
@@ -926,6 +926,11 @@ els.backBtn.addEventListener('click', () => state.pauseControls?.back());
 els.fwdBtn.addEventListener('click', () => state.pauseControls?.fwd());
 els.replayBtn.addEventListener('click', () => state.pauseControls?.replay());
 els.continueBtn.addEventListener('click', () => state.pauseControls?.cont());
+document.addEventListener('keydown', (e) => {
+  if (!state.pauseControls) return;
+  if (e.key === 'ArrowLeft') { e.preventDefault(); state.pauseControls.back(); }
+  if (e.key === 'ArrowRight') { e.preventDefault(); state.pauseControls.fwd(); }
+});
 els.speedSlider.value = localStorage.getItem('chessauto-speed') || String(DEFAULT_ANIM_MS);
 els.speedValue.textContent = `${els.speedSlider.value} ms`;
 els.speedSlider.addEventListener('input', () => {
