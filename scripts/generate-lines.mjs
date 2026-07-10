@@ -205,6 +205,7 @@ rmSync(tmp, { recursive: true, force: true });
 // Merge results into puzzles, self-healing verdict mismatches.
 let mismatches = 0;
 for (const puzzle of puzzles) {
+  if (ONLY && !ONLY.includes(puzzle.id)) continue; // keep other puzzles' baked lines intact
   puzzle.lines = {};
   for (const [key, r] of results) {
     const [id, mode, sq] = key.split('|');
