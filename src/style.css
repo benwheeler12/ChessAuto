@@ -36,6 +36,7 @@ header {
 }
 header h1 { margin: 0; font-size: 1.6rem; letter-spacing: 0.02em; }
 .tagline { margin: 0.25rem 0 0; color: var(--muted); font-size: 0.9rem; }
+.tagline a { color: var(--accent-2); }
 
 main {
   display: flex;

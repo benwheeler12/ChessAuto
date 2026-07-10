@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>About — ChessAuto</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♛</text></svg>" />
+    <style>
+      :root {
+        --bg: #1f1d1a; --panel: #2a2724; --text: #ece8e1; --muted: #a8a29a;
+        --accent: #7fa650; --accent-2: #95bb4a;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; background: var(--bg); color: var(--text);
+        font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+        line-height: 1.6;
+      }
+      main { max-width: 44rem; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+      h1 { font-size: 1.7rem; margin: 0 0 0.25rem; }
+      h2 { font-size: 1.15rem; margin: 2rem 0 0.5rem; color: var(--accent-2); }
+      p, li { color: var(--text); font-size: 0.95rem; }
+      .muted { color: var(--muted); }
+      a { color: var(--accent-2); }
+      ol li, ul li { margin-bottom: 0.4rem; }
+      .card {
+        background: var(--panel); border-radius: 10px; padding: 1rem 1.25rem;
+        margin: 1rem 0;
+      }
+      .back { display: inline-block; margin-bottom: 1.5rem; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <a class="back" href="./index.html">← Back to the puzzles</a>
+      <h1>♛ How these puzzles are made</h1>
+      <p class="muted">Every puzzle here was discovered by a program and verified by a chess engine — no human composed them.</p>
+
+      <h2>The rules</h2>
+      <div class="card">
+        <ol>
+          <li>You're shown a real position from a strong Lichess game, with <strong>one of your pieces removed</strong>.</li>
+          <li>Place it on any legal empty square — but choose carefully: <strong>at most two squares on the whole board win</strong>. Every other square loses.</li>
+          <li>After you place the piece, <strong>your opponent moves first</strong> — so a placement that just grabs material usually gets punished.</li>
+          <li>Press play and two Stockfish engines battle it out. You win only if your side <strong>delivers checkmate</strong>. Draws don't count.</li>
+        </ol>
+      </div>
+
+      <h2>Where the positions come from</h2>
+      <p>
+        We stream games from the <a href="https://database.lichess.org">Lichess open database</a>, keeping decisive
+        blitz-or-slower games where both players are rated 2300+. Every second position of each game is scored with a
+        set of fast, engine-free <em>features</em>: hanging pieces, mutual attacks, pins, pressure around the kings,
+        available checks and captures, mobility imbalance, and how far passed pawns have advanced.
+      </p>
+      <p>
+        The <strong>most extreme positions per feature</strong> — the sharpest, most tension-loaded moments of hundreds of
+        games — become puzzle candidates. Each puzzle names the features that discovered it.
+      </p>
+
+      <h2>How a candidate becomes a puzzle</h2>
+      <ol>
+        <li>Remove one of the side-to-move's pieces (queens, rooks, minors, pawns — even the king).</li>
+        <li>Have Stockfish evaluate <strong>every legal square</strong> the piece could return to, with the opponent to move.</li>
+        <li>Keep the position only if placement is precise: at least one square is completely winning (+3 or better after deep verification) and <strong>no more than two squares</strong> win at all.</li>
+        <li>Positions that were already decided, that win everywhere, or that win nowhere are thrown away — the vast majority.</li>
+      </ol>
+      <p class="muted">
+        Roughly one in six candidate positions survives. Some puzzles also ship with fully pre-computed engine playouts
+        for every legal square; for the rest, Stockfish runs live in your browser when you press play.
+      </p>
+
+      <h2>Credits</h2>
+      <p class="muted">
+        Engine: <a href="https://stockfishchess.org/">Stockfish</a> (WASM, in-browser).
+        Rules &amp; legality: chess.js. Piece art: the classic cburnett set (CC BY-SA 3.0).
+        Games: the Lichess community.
+      </p>
+    </main>
+  </body>
+</html>

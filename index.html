@@ -3,14 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ChessAuto — Build a Winning Position</title>
+    <title>ChessAuto — Place the Piece, Win the Game</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♛</text></svg>" />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
     <header>
       <h1>♛ ChessAuto</h1>
-      <p class="tagline">Place the missing pieces, press play, and let the engines decide if your position wins.</p>
+      <p class="tagline">A piece has been lifted off a real grandmaster-level game. Put it back on the one square that wins — your opponent moves first. <a href="./about.html">How these puzzles are made</a></p>
     </header>
 
     <main>
@@ -34,29 +34,6 @@
         </div>
 
         <div class="status" id="status">Loading engines…</div>
-
-        <div class="proto-switch" id="proto-switch" role="tablist" aria-label="Game prototype">
-          <button data-proto="1">
-            <strong>Prototype 1</strong>
-            <span>pick from 3 squares</span>
-          </button>
-          <button data-proto="2">
-            <strong>Prototype 2</strong>
-            <span>find the hidden square</span>
-          </button>
-          <button data-proto="3">
-            <strong>Prototype 3</strong>
-            <span>opponent moves first</span>
-          </button>
-          <button data-proto="4">
-            <strong>Prototype 4</strong>
-            <span>open board, opponent first</span>
-          </button>
-          <button data-proto="5">
-            <strong>Prototype 5</strong>
-            <span>P4 rules, discovery set</span>
-          </button>
-        </div>
 
         <div class="puzzle-nav">
           <button id="prev-puzzle" title="Previous puzzle">◀</button>

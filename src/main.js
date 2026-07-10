@@ -47,7 +47,7 @@ function moveAnimMs() {
 
 // ---- State ----
 const state = {
-  proto: Number(localStorage.getItem('chessauto-proto')) === 2 ? 2 : 1,
+  proto: 5, // demo build: discovery-set rules only
   puzzle: PUZZLES[0],
   phase: 'setup', // 'setup' | 'playing' | 'done'
   baseMap: {}, // pieces fixed by the puzzle
