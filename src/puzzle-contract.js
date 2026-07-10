@@ -140,6 +140,31 @@ export function placeableSquares(puzzle, pieceType = puzzle.place[0]) {
   return squares;
 }
 
+/**
+ * If the allowed squares fill a rectangular zone of the board (counting
+ * occupied squares inside the rectangle as part of it — generators list
+ * only the EMPTY squares of a sector), returns its corners
+ * {from, to} (bottom-left, top-right). Degenerate 1-wide strips and
+ * scattered candidate sets return null, so they keep per-square markers.
+ */
+export function allowedZone(puzzle) {
+  const allowed = puzzle.placement?.allowed;
+  if (!allowed || allowed.length < 2) return null;
+  const map = fenToMap(puzzle.fen);
+  const files = allowed.map((sq) => sq.charCodeAt(0) - 97);
+  const ranks = allowed.map(rankOf);
+  const f0 = Math.min(...files); const f1 = Math.max(...files);
+  const r0 = Math.min(...ranks); const r1 = Math.max(...ranks);
+  if (f1 - f0 < 1 || r1 - r0 < 1) return null;
+  for (let f = f0; f <= f1; f++) {
+    for (let r = r0; r <= r1; r++) {
+      const sq = String.fromCharCode(97 + f) + r;
+      if (!allowed.includes(sq) && !map[sq]) return null; // hole in the zone
+    }
+  }
+  return { from: String.fromCharCode(97 + f0) + r0, to: String.fromCharCode(97 + f1) + r1 };
+}
+
 /** Human-readable rule chips for the UI, derived purely from the contract. */
 export function ruleChips(puzzle) {
   const chips = [];

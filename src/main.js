@@ -7,7 +7,7 @@ import { Board, pieceClass } from './board.js';
 import { fenToMap, buildFen } from './fen.js';
 import {
   turnFor, signature, startFen, placementError, startPositionError,
-  expectedVerdict, lineFor, ruleChips,
+  expectedVerdict, lineFor, ruleChips, allowedZone,
 } from './puzzle-contract.js';
 
 const MOVETIME_MS = 300; // per engine move during the playout
@@ -185,10 +185,17 @@ function refreshSetup() {
   }
   board.setPlacing(state.selectedTray >= 0);
 
-  // Constraint markers come straight from the contract.
+  // Constraint markers come straight from the contract. A rectangular zone
+  // draws as one outlined sector; scattered allowed squares get dots.
   const map = currentMap();
-  for (const sq of puzzle.placement?.allowed ?? []) {
-    if (!map[sq]) board.highlight(sq, 'option');
+  const zone = allowedZone(puzzle);
+  if (zone) {
+    board.showZone(zone.from, zone.to);
+  } else {
+    board.clearZone();
+    for (const sq of puzzle.placement?.allowed ?? []) {
+      if (!map[sq]) board.highlight(sq, 'option');
+    }
   }
   for (const sq of puzzle.placement?.blocked ?? []) {
     board.highlight(sq, 'excluded');
@@ -332,6 +339,7 @@ async function play() {
   els.banner.classList.add('hidden');
   els.progress.classList.remove('hidden');
   board.clearHighlights('hint', 'bad', 'selected', 'option', 'excluded');
+  board.clearZone();
 
   const fen = startFen(state.puzzle, placements());
   state.playoutFen = fen;

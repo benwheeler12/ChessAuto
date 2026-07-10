@@ -53,6 +53,36 @@ export class Board {
     this.assignSquares();
   }
 
+  /**
+   * Draw a rectangle outline around the zone spanned by two corner squares
+   * (any two opposite corners). Replaces any previous zone.
+   */
+  showZone(from, to) {
+    this.clearZone();
+    const disp = (sq) => {
+      const file = sq.charCodeAt(0) - 97;
+      const rank = Number(sq[1]);
+      return this.orientation === 'w'
+        ? { col: file, row: 8 - rank }
+        : { col: 7 - file, row: rank - 1 };
+    };
+    const a = disp(from);
+    const b = disp(to);
+    const zone = document.createElement('div');
+    zone.className = 'zone';
+    zone.style.left = `${Math.min(a.col, b.col) * 12.5}%`;
+    zone.style.top = `${Math.min(a.row, b.row) * 12.5}%`;
+    zone.style.width = `${(Math.abs(a.col - b.col) + 1) * 12.5}%`;
+    zone.style.height = `${(Math.abs(a.row - b.row) + 1) * 12.5}%`;
+    this.el.appendChild(zone);
+    this.zoneEl = zone;
+  }
+
+  clearZone() {
+    this.zoneEl?.remove();
+    this.zoneEl = null;
+  }
+
   assignSquares() {
     this.squares.clear();
     const cells = this.el.children;
