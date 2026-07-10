@@ -13,6 +13,14 @@ import {
 const MOVETIME_MS = 300; // per engine move during the playout
 const DEFAULT_ANIM_MS = 50; // piece-slide duration (user-adjustable via slider)
 
+// Phase 1 of a playout: the opening moves play slowly until the material
+// verdict is visible, then pause for ◀ ▶ review before the fast finish.
+const PHASE1_PACE_MS = 1100; // deliberate per-move pace for the opening
+const PHASE1_ANIM_MS = 250; // minimum slide duration during phase 1
+const SWING_POINTS = 3; // material change that counts as "the game swung"
+const PHASE1_MAX_PLIES = 20; // pause here even if material never swings
+const PIECE_POINTS = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Minimum time between displayed moves: the slide plus an equal rest. */
@@ -39,6 +47,9 @@ const els = {
   resetBtn: $('reset-btn'),
   playBtn: $('play-btn'),
   stopBtn: $('stop-btn'),
+  backBtn: $('back-btn'),
+  fwdBtn: $('fwd-btn'),
+  continueBtn: $('continue-btn'),
   retryBtn: $('retry-btn'),
   lichessBtn: $('lichess-btn'),
   progress: $('progress'),
@@ -82,6 +93,7 @@ const state = {
   runId: 0,
   baseCp: 0,
   playoutFen: null, // FEN currently shown on the board during/after a playout
+  pauseControls: null, // ◀ ▶ Continue handlers while a playout is paused
 };
 
 const activePuzzles = () => COLLECTIONS[state.collection].puzzles;
@@ -204,6 +216,9 @@ function refreshSetup() {
   els.playBtn.disabled = !(canRun && remaining === 0 && !error);
   els.playBtn.classList.remove('hidden');
   els.stopBtn.classList.add('hidden');
+  els.backBtn.classList.add('hidden');
+  els.fwdBtn.classList.add('hidden');
+  els.continueBtn.classList.add('hidden');
   els.retryBtn.classList.add('hidden');
   els.resetBtn.classList.remove('hidden');
   els.resetBtn.disabled = false;
@@ -405,17 +420,9 @@ async function play() {
 
   await playReveal();
   if (runId !== state.runId) return;
-  setStatus('Engines are playing… ♜ vs ♜');
 
-  // Consumer: drain the buffer at the user's pace.
-  while (true) {
-    if (!queue.length) {
-      if (producerDone) break;
-      await sleep(25);
-      if (runId !== state.runId) return;
-      continue;
-    }
-    const item = queue.shift();
+  /** Animate one buffered move onto the board at the given pace. */
+  async function applyMove(item, paceMs, animMs) {
     const stepStart = performance.now();
     const { played: mv } = item;
     plies++;
@@ -428,7 +435,7 @@ async function play() {
     const homeRank = mv.color === 'w' ? 1 : 8;
     if (mv.flags.includes('k')) slides.push({ from: `h${homeRank}`, to: `f${homeRank}` });
     if (mv.flags.includes('q')) slides.push({ from: `a${homeRank}`, to: `d${homeRank}` });
-    await board.animateMoves(slides, fenToMap(item.fen), moveAnimMs());
+    await board.animateMoves(slides, fenToMap(item.fen), animMs);
     if (runId !== state.runId) return;
     state.playoutFen = item.fen;
     appendMove(mv, item.moveNo);
@@ -440,11 +447,132 @@ async function play() {
       ? `Move ${Math.ceil(plies / 2)} · no captures or pawn moves for ${Math.floor(quietPlies / 2)} — drawn at 50`
       : `Move ${Math.ceil(plies / 2)}`;
 
-    const rest = movePaceMs() - (performance.now() - stepStart);
-    if (rest > 0) {
-      await sleep(rest);
-      if (runId !== state.runId) return;
+    const rest = paceMs - (performance.now() - stepStart);
+    if (rest > 0) await sleep(rest);
+  }
+
+  /** Material balance from the player's perspective, in pawn points. */
+  const materialFor = (f) => {
+    let diff = 0;
+    for (const ch of f.split(' ')[0]) {
+      const value = PIECE_POINTS[ch.toLowerCase()];
+      if (value) diff += (ch === ch.toUpperCase() ? 1 : -1) * value;
     }
+    return state.puzzle.player === 'w' ? diff : -diff;
+  };
+  const startMaterial = materialFor(fen);
+  const swingAt = (f) => materialFor(f) - startMaterial;
+
+  /** Wait until n buffered moves are visible (or the game has ended). */
+  const buffered = async (n) => {
+    while (queue.length < n && !producerDone) {
+      await sleep(25);
+      if (runId !== state.runId) return null;
+    }
+    return queue.slice(0, n);
+  };
+
+  // ---- Phase 1: play the opening slowly until the game visibly swings ----
+  setStatus('Playing the first moves slowly — watch how the position develops…');
+  const history = []; // applied moves, for ◀ ▶ review
+  let pausedBySwing = false;
+  let pausedByCap = false;
+  while (true) {
+    const ready = await buffered(1);
+    if (ready === null || runId !== state.runId) return;
+    if (!ready.length) break; // game over during phase 1
+    const item = queue.shift();
+    await applyMove(item, Math.max(PHASE1_PACE_MS, movePaceMs()), Math.max(PHASE1_ANIM_MS, moveAnimMs()));
+    if (runId !== state.runId) return;
+    history.push(item);
+
+    const swing = swingAt(item.fen);
+    if (Math.abs(swing) >= SWING_POINTS) {
+      // Only pause on a SETTLED swing: mid-exchange material dips (QxP, pawn
+      // recaptures the queen) shouldn't trip it, so peek two plies ahead.
+      const ahead = await buffered(2);
+      if (ahead === null || runId !== state.runId) return;
+      if (ahead.every((next) => Math.sign(swingAt(next.fen)) === Math.sign(swing)
+        && Math.abs(swingAt(next.fen)) >= SWING_POINTS)) {
+        pausedBySwing = true;
+        break;
+      }
+    }
+    if (history.length >= PHASE1_MAX_PLIES) {
+      pausedByCap = true;
+      break;
+    }
+  }
+
+  // ---- Review pause: ◀ ▶ step through phase 1, Continue for the finish ----
+  const moreToPlay = queue.length > 0 || !producerDone;
+  if ((pausedBySwing || pausedByCap) && moreToPlay && history.length) {
+    state.phase = 'paused';
+    els.backBtn.classList.remove('hidden');
+    els.fwdBtn.classList.remove('hidden');
+    els.continueBtn.classList.remove('hidden');
+    const swing = swingAt(history[history.length - 1].fen);
+    setStatus(pausedBySwing
+      ? (swing < 0
+        ? 'Your side just lost material — this is where it goes wrong. Step ◀ ▶ through the moves, then Continue.'
+        : 'Your side has won material! Step ◀ ▶ to review how, then press Continue.')
+      : `First ${Math.ceil(history.length / 2)} moves played with no material swing. Step ◀ ▶ to review, then Continue.`);
+
+    let reviewIdx = history.length - 1; // -1 = the constructed start position
+    const showReview = () => {
+      const shown = reviewIdx >= 0 ? history[reviewIdx] : null;
+      board.setPosition(fenToMap(shown ? shown.fen : fen));
+      board.clearHighlights('last-move');
+      if (shown) {
+        board.highlight(shown.played.from, 'last-move');
+        board.highlight(shown.played.to, 'last-move');
+      }
+      setEvalBar(shown ? shown.whiteCp : (state.baseCp ?? 0));
+      state.playoutFen = shown ? shown.fen : fen;
+      els.progress.textContent = shown
+        ? `Reviewing move ${reviewIdx + 1} of ${history.length}`
+        : 'Reviewing the starting position';
+    };
+
+    let resume = false;
+    state.pauseControls = {
+      back: () => { if (reviewIdx > -1) { reviewIdx--; showReview(); } },
+      fwd: () => { if (reviewIdx < history.length - 1) { reviewIdx++; showReview(); } },
+      cont: () => { resume = true; },
+    };
+    while (!resume) {
+      await sleep(60);
+      if (runId !== state.runId) { state.pauseControls = null; return; }
+    }
+    state.pauseControls = null;
+    state.phase = 'playing';
+    els.backBtn.classList.add('hidden');
+    els.fwdBtn.classList.add('hidden');
+    els.continueBtn.classList.add('hidden');
+    if (reviewIdx < history.length - 1) {
+      // Snap back to the end of phase 1 before resuming.
+      const last = history[history.length - 1];
+      board.setPosition(fenToMap(last.fen));
+      board.clearHighlights('last-move');
+      board.highlight(last.played.from, 'last-move');
+      board.highlight(last.played.to, 'last-move');
+      setEvalBar(last.whiteCp);
+      state.playoutFen = last.fen;
+    }
+  }
+
+  // ---- Phase 2: drain the rest of the game at the user's pace ----
+  setStatus('Engines are playing… ♜ vs ♜');
+  while (true) {
+    if (!queue.length) {
+      if (producerDone) break;
+      await sleep(25);
+      if (runId !== state.runId) return;
+      continue;
+    }
+    const item = queue.shift();
+    await applyMove(item, movePaceMs(), moveAnimMs());
+    if (runId !== state.runId) return;
   }
 
   if (runId !== state.runId) return;
@@ -537,6 +665,9 @@ function finish(game) {
   els.banner.append(h2, p, buildRatingRow());
 
   els.stopBtn.classList.add('hidden');
+  els.backBtn.classList.add('hidden');
+  els.fwdBtn.classList.add('hidden');
+  els.continueBtn.classList.add('hidden');
   els.retryBtn.classList.remove('hidden');
   setStatus(win
     ? 'You built a winning position. Try the next puzzle!'
@@ -705,6 +836,9 @@ els.stopBtn.addEventListener('click', stopPlayout);
 els.retryBtn.addEventListener('click', backToSetup);
 els.resetBtn.addEventListener('click', resetPlacements);
 els.lichessBtn.addEventListener('click', openInLichess);
+els.backBtn.addEventListener('click', () => state.pauseControls?.back());
+els.fwdBtn.addEventListener('click', () => state.pauseControls?.fwd());
+els.continueBtn.addEventListener('click', () => state.pauseControls?.cont());
 els.speedSlider.value = localStorage.getItem('chessauto-speed') || String(DEFAULT_ANIM_MS);
 els.speedValue.textContent = `${els.speedSlider.value} ms`;
 els.speedSlider.addEventListener('input', () => {
