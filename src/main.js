@@ -159,8 +159,40 @@ function loadPuzzle(index) {
   els.banner.classList.add('hidden');
   els.progress.classList.add('hidden');
   board.setOrientation(puzzle.player);
-  setEvalBar(0);
+  showBaseEval();
   refreshSetup();
+}
+
+// ---- Base-position evaluation for the eval bar ----
+// Before any piece is placed, the bar shows how bad things are WITHOUT the
+// missing piece, so a good placement visibly swings it during the playout.
+let baseEvalToken = 0;
+
+async function showBaseEval() {
+  const token = ++baseEvalToken;
+  state.baseCp = 0;
+  if (state.puzzle.place.includes('k')) {
+    // A side without its king can't be evaluated — call it lost until placed.
+    state.baseCp = state.puzzle.player === 'w' ? -9500 : 9500;
+    setEvalBar(state.baseCp);
+    return;
+  }
+  setEvalBar(0);
+  const fen = buildFen(state.baseMap, currentTurn());
+  try {
+    await whiteEngine.init();
+    // Serialize with any earlier base eval still searching.
+    if (state.baseEvalSearch) await state.baseEvalSearch.catch(() => {});
+    if (token !== baseEvalToken || state.phase !== 'setup') return;
+    state.baseEvalSearch = whiteEngine.search(fen, 250);
+    const { score } = await state.baseEvalSearch;
+    state.baseEvalSearch = null;
+    if (token !== baseEvalToken || state.phase !== 'setup') return;
+    state.baseCp = scoreToWhiteCp(score, fen.split(' ')[1]);
+    setEvalBar(state.baseCp);
+  } catch {
+    // Engines unavailable (e.g. blocked download) — leave the bar neutral.
+  }
 }
 
 function currentMap() {
@@ -334,7 +366,7 @@ function resetPlacements() {
   els.movelist.innerHTML = '';
   els.banner.classList.add('hidden');
   els.progress.classList.add('hidden');
-  setEvalBar(0);
+  setEvalBar(state.baseCp ?? 0);
   refreshSetup();
 }
 
@@ -398,6 +430,12 @@ async function play() {
   if (!line) {
     // Live path: the engines fill the move buffer as fast as they can
     // think — starting during the reveal, so the display never starts dry.
+    // Let any in-flight base-position eval finish first so its bestmove
+    // can't be mistaken for the playout's.
+    if (state.baseEvalSearch) {
+      await state.baseEvalSearch.catch(() => {});
+      state.baseEvalSearch = null;
+    }
     await Promise.all([whiteEngine.init(), blackEngine.init()]);
     await Promise.all([whiteEngine.newGame(), blackEngine.newGame()]);
     if (runId !== state.runId) return;
@@ -639,7 +677,7 @@ function backToSetup() {
   els.banner.classList.add('hidden');
   els.progress.classList.add('hidden');
   els.movelist.innerHTML = '';
-  setEvalBar(0);
+  setEvalBar(state.baseCp ?? 0);
   refreshSetup();
 }
 
