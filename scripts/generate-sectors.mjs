@@ -14,7 +14,9 @@
 //
 // Usage: node scripts/generate-sectors.mjs --label "My batch label"
 //   [--features data/features.jsonl] [--pgn data/lichess-games.pgn]
-//   [--top 120] [--workers 3]
+//   [--top 300] [--offset 0] [--workers 3]
+// --offset skips the first N candidates (already scanned by a previous run)
+// so follow-up runs explore the next band of sharp positions.
 // (Internal: --worker <jobsFile> <outFile> runs a batch in a child process.)
 
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
@@ -255,6 +257,7 @@ const opt = (name, dflt) => {
 const FEATURES_FILE = opt('features', 'data/features.jsonl');
 const PGN_FILE = opt('pgn', 'data/lichess-games.pgn');
 const TOP_N = Number(opt('top', 300));
+const OFFSET = Number(opt('offset', 0));
 const WORKERS = Number(opt('workers', 3));
 const LABEL = opt('label', null);
 if (!LABEL) {
@@ -289,6 +292,7 @@ const nameOf = (idx) => {
 
 const perGame = new Map();
 const jobs = [];
+let skipped = 0;
 for (const row of [...rows].sort((a, b) => sharpness(b) - sharpness(a))) {
   if (jobs.length >= TOP_N) break;
   const n = perGame.get(row.game) ?? 0;
@@ -297,9 +301,10 @@ for (const row of [...rows].sort((a, b) => sharpness(b) - sharpness(a))) {
   const player = row.fen.split(' ')[1] === 'w' ? 'b' : 'w'; // opponent moves first
   if (covered.has(`${meta.site}|${row.moveNo}|${player}`)) continue;
   perGame.set(row.game, n + 1);
+  if (skipped < OFFSET) { skipped++; continue; }
   jobs.push({ order: jobs.length, row, meta });
 }
-console.error(`${jobs.length} sharp positions to qualify on ${WORKERS} workers`);
+console.error(`${jobs.length} sharp positions (offset ${OFFSET}) to qualify on ${WORKERS} workers`);
 
 const tmp = mkdtempSync(join(tmpdir(), 'chessauto-sectors-'));
 const self = fileURLToPath(import.meta.url);
