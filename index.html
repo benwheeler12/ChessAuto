@@ -35,28 +35,8 @@
 
         <div class="status" id="status">Loading engines…</div>
 
-        <div class="proto-switch" id="proto-switch" role="tablist" aria-label="Game prototype">
-          <button data-proto="1">
-            <strong>Prototype 1</strong>
-            <span>pick from 3 squares</span>
-          </button>
-          <button data-proto="2">
-            <strong>Prototype 2</strong>
-            <span>find the hidden square</span>
-          </button>
-          <button data-proto="3">
-            <strong>Prototype 3</strong>
-            <span>opponent moves first</span>
-          </button>
-          <button data-proto="4">
-            <strong>Prototype 4</strong>
-            <span>open board, opponent first</span>
-          </button>
-          <button data-proto="5">
-            <strong>Prototype 5</strong>
-            <span>P4 rules, discovery set</span>
-          </button>
-        </div>
+        <label class="collection-label" for="collection-select">Puzzle collection <span class="collection-hint">(newest first)</span></label>
+        <select id="collection-select" class="collection-select"></select>
 
         <div class="puzzle-nav">
           <button id="prev-puzzle" title="Previous puzzle">◀</button>
@@ -65,6 +45,7 @@
         </div>
 
         <h2 id="puzzle-name"></h2>
+        <div id="rule-chips" class="rule-chips"></div>
         <p id="puzzle-desc" class="desc"></p>
 
         <div class="tray-label" id="tray-label">Pieces to place — drag onto the board, or click a piece then a square:</div>

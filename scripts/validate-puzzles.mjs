@@ -1,176 +1,138 @@
-// Sanity-checks every puzzle definition:
-//  - the semicomplete FEN is legal and it's the player's move
-//  - the opponent doesn't start in check
-//  - free-placement puzzles: decisive material advantage is reachable
-//  - candidate puzzles: 2-3 unique empty squares, the solution among them,
-//    and every candidate placement produces a legal starting position
-import { Chess, validateFen } from 'chess.js';
-import { PUZZLES } from '../src/puzzles.js';
-import { fenToMap, buildFen, flipTurn, rankOf } from '../src/fen.js';
+// Validates every puzzle batch against the puzzle contract
+// (src/puzzle-contract.js). Batch files are discovered from src/puzzles/
+// directly (Node can't use Vite's import.meta.glob).
+//
+// Checks per puzzle:
+//  - contract shape: required fields, enums, unique ids
+//  - placement constraints reference valid, empty, disjoint squares
+//  - every solution is a legal, allowed placement
+//  - every stored line replays legally to a terminal position and agrees
+//    with the puzzle's verdict for that placement (when verdicts exist)
+//  - free-placement puzzles without verdicts get the material sanity check
+
+import { Chess } from 'chess.js';
+import { readBatches } from './lib/batches.mjs';
+import { fenToMap } from '../src/fen.js';
+import {
+  turnFor, signature, parseSignature, startFen, placementError,
+  isLegalStart, placeableSquares,
+} from '../src/puzzle-contract.js';
 
 const VALUES = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+const PIECE_TYPES = ['p', 'n', 'b', 'r', 'q', 'k'];
 let failures = 0;
 
 function fail(puzzle, msg) {
   failures++;
-  console.error(`✗ ${puzzle.id}: ${msg}`);
+  console.error(`✗ ${puzzle.id ?? '(no id)'}: ${msg}`);
 }
 
+const batches = readBatches();
+const PUZZLES = batches.flatMap((b) => b.puzzles);
+
+const seenIds = new Set();
+const validSquare = (sq) => /^[a-h][1-8]$/.test(sq);
+let lineCount = 0;
+
 for (const puzzle of PUZZLES) {
-  if (!puzzle.place?.length) fail(puzzle, 'no pieces to place');
+  // ---- shape ----
+  if (!puzzle.id || seenIds.has(puzzle.id)) fail(puzzle, 'missing or duplicate id');
+  seenIds.add(puzzle.id);
+  if (!puzzle.name) fail(puzzle, 'missing name');
+  if (puzzle.player !== 'w' && puzzle.player !== 'b') fail(puzzle, `bad player "${puzzle.player}"`);
+  if (!['player', 'opponent'].includes(puzzle.firstMove)) fail(puzzle, `bad firstMove "${puzzle.firstMove}"`);
+  if (!Array.isArray(puzzle.place) || !puzzle.place.length || puzzle.place.some((t) => !PIECE_TYPES.includes(t))) {
+    fail(puzzle, 'bad place list');
+    continue;
+  }
+  if (!puzzle.meta?.batch?.id) fail(puzzle, 'missing meta.batch');
 
-  // King-placement puzzles have a kingless base FEN, which chess.js can't
-  // load — validate their structure by hand, everything else normally.
-  const placesKing = puzzle.place?.includes('k');
-  let game = null;
-  if (placesKing) {
-    const map = fenToMap(puzzle.fen);
-    const kings = Object.values(map).filter((p) => p.type === 'k');
-    if (kings.length !== 1 || kings[0].color === puzzle.player) {
-      fail(puzzle, 'king puzzle must be missing exactly the player’s king');
-    }
-    if (!puzzle.p4 && !puzzle.p5) fail(puzzle, 'king puzzles only work in open-board prototypes (4/5)');
-  } else {
-    const check = validateFen(puzzle.fen);
-    if (!check.ok) { fail(puzzle, `invalid FEN: ${check.error}`); continue; }
-    game = new Chess(puzzle.fen);
-    if (game.turn() !== puzzle.player) fail(puzzle, 'it is not the player’s move');
+  // ---- board ----
+  const map = fenToMap(puzzle.fen);
+  const kings = Object.values(map).filter((p) => p.type === 'k');
+  const placesKing = puzzle.place.includes('k');
+  const expectedKings = placesKing ? 1 : 2;
+  if (kings.length !== expectedKings) fail(puzzle, `expected ${expectedKings} king(s) on the base board, found ${kings.length}`);
+  if (placesKing && kings.some((k) => k.color === puzzle.player)) {
+    fail(puzzle, 'king puzzle must be missing exactly the player’s king');
   }
 
-  // Player-to-move modes (P1/P2/classics): the opponent may not start in check.
-  if (puzzle.candidates || puzzle.excluded || !puzzle.source) {
-    const flipped = flipTurn(puzzle.fen);
-    if (validateFen(flipped).ok && new Chess(flipped).isCheck()) {
-      fail(puzzle, 'opponent starts in check');
+  // ---- placement constraints ----
+  const allowed = puzzle.placement?.allowed;
+  const blocked = puzzle.placement?.blocked;
+  for (const [label, list] of [['allowed', allowed], ['blocked', blocked]]) {
+    if (!list) continue;
+    if (!list.length) fail(puzzle, `empty ${label} list — omit the constraint instead`);
+    if (new Set(list).size !== list.length) fail(puzzle, `duplicate ${label} squares`);
+    for (const sq of list) {
+      if (!validSquare(sq)) fail(puzzle, `bad ${label} square "${sq}"`);
+      else if (map[sq]) fail(puzzle, `${label} square ${sq} is occupied`);
     }
   }
-  // P3 flips the turn, so there the PLAYER may not start in check.
-  if (puzzle.p3 && new Chess(puzzle.fen).isCheck()) {
-    fail(puzzle, 'P3: player would start in check');
+  if (allowed && blocked && allowed.some((sq) => blocked.includes(sq))) {
+    fail(puzzle, 'allowed and blocked overlap');
   }
+  if (allowed && allowed.length < 2) fail(puzzle, 'fewer than 2 allowed squares');
 
-  // Prototype 4/5 data: 1-2 winning squares, all empty, opponent moves first.
-  for (const setKey of ['p4', 'p5']) {
-    if (!puzzle[setKey]) continue;
-    const map = fenToMap(puzzle.fen);
-    const { solutions } = puzzle[setKey];
-    if (!solutions?.length || solutions.length > 2) {
-      fail(puzzle, `${setKey}: ${solutions?.length ?? 0} solutions (want 1-2)`);
-    }
-    if (new Set(solutions).size !== solutions.length) fail(puzzle, `${setKey}: duplicate solutions`);
-    const opponent = puzzle.player === 'w' ? 'b' : 'w';
-    for (const sq of solutions ?? []) {
-      if (!/^[a-h][1-8]$/.test(sq)) { fail(puzzle, `${setKey}: bad solution square "${sq}"`); continue; }
-      if (map[sq]) { fail(puzzle, `${setKey}: solution square ${sq} is occupied`); continue; }
-      const placedFen = buildFen(
-        { ...map, [sq]: { type: puzzle.place[0], color: puzzle.player } },
-        opponent,
-      );
-      if (!validateFen(placedFen).ok) fail(puzzle, `${setKey}: placement on ${sq} is not a legal position`);
-      else if (new Chess(flipTurn(placedFen)).isCheck()) {
-        fail(puzzle, `${setKey}: placement on ${sq} leaves the player in check`);
-      }
-    }
-  }
-
-  // Prototype 2/3 data: blocked squares must be sane and never the solution
-  const exclusionSets = [];
-  if (puzzle.excluded) exclusionSets.push({ excluded: puzzle.excluded, solution: puzzle.solution, tag: 'P2' });
-  if (puzzle.p3) exclusionSets.push({ excluded: puzzle.p3.excluded, solution: puzzle.p3.solution, tag: 'P3' });
-  for (const { excluded, solution, tag } of exclusionSets) {
-    const map = fenToMap(puzzle.fen);
-    if (!/^[a-h][1-8]$/.test(solution ?? '')) fail(puzzle, `${tag}: bad solution "${solution}"`);
-    else if (map[solution]) fail(puzzle, `${tag}: solution square ${solution} is occupied`);
-    if (excluded.includes(solution)) fail(puzzle, `${tag}: solution square is excluded`);
-    if (new Set(excluded).size !== excluded.length) fail(puzzle, `${tag}: duplicate excluded squares`);
-    for (const sq of excluded) {
-      if (!/^[a-h][1-8]$/.test(sq)) fail(puzzle, `${tag}: bad excluded square "${sq}"`);
-      else if (map[sq]) fail(puzzle, `${tag}: excluded square ${sq} is occupied`);
-    }
-  }
-
-  if (puzzle.candidates) {
-    // Generated candidate-constrained puzzle
-    if (puzzle.place.length !== 1) fail(puzzle, 'candidate puzzles must place exactly one piece');
-    if (puzzle.candidates.length < 2 || puzzle.candidates.length > 3) {
-      fail(puzzle, `${puzzle.candidates.length} candidates (want 2-3)`);
-    }
-    if (new Set(puzzle.candidates).size !== puzzle.candidates.length) {
-      fail(puzzle, 'duplicate candidate squares');
-    }
-    if (!puzzle.candidates.includes(puzzle.solution)) {
-      fail(puzzle, 'solution square is not among the candidates');
-    }
-    const map = fenToMap(puzzle.fen);
-    for (const sq of puzzle.candidates) {
-      if (!/^[a-h][1-8]$/.test(sq)) { fail(puzzle, `bad square "${sq}"`); continue; }
-      if (map[sq]) { fail(puzzle, `candidate ${sq} is occupied`); continue; }
-      if (puzzle.place[0] === 'p' && (rankOf(sq) === 1 || rankOf(sq) === 8)) {
-        fail(puzzle, `pawn candidate on back rank ${sq}`);
+  // ---- solutions ----
+  if (puzzle.solutions) {
+    if (!puzzle.solutions.length) fail(puzzle, 'empty solutions list');
+    for (const sig of puzzle.solutions) {
+      const parts = parseSignature(sig);
+      const types = parts.map((p) => p.type).sort().join('');
+      if (types !== [...puzzle.place].sort().join('')) {
+        fail(puzzle, `solution "${sig}" doesn't match the place list`);
         continue;
       }
-      const placedFen = buildFen(
-        { ...map, [sq]: { type: puzzle.place[0], color: puzzle.player } },
-        puzzle.player,
-      );
-      if (!validateFen(placedFen).ok) { fail(puzzle, `placement on ${sq} is not a legal position`); continue; }
-      if (new Chess(flipTurn(placedFen)).isCheck()) {
-        fail(puzzle, `placement on ${sq} gives immediate check`);
+      let bad = false;
+      for (const part of parts) {
+        if (!validSquare(part.square)) { fail(puzzle, `solution "${sig}" has bad square`); bad = true; break; }
+        const err = placementError(puzzle, part.square, part.type, map);
+        if (err) { fail(puzzle, `solution "${sig}": ${err}`); bad = true; break; }
+      }
+      if (!bad && !isLegalStart(startFen(puzzle, parts))) {
+        fail(puzzle, `solution "${sig}" is not a legal starting position`);
       }
     }
-  } else if (!puzzle.source) {
-    // Hand-written free-placement puzzle
-    if (game.isCheck()) fail(puzzle, 'player starts in check');
+  } else if (puzzle.place.length >= 1 && !puzzle.lines) {
+    // Free-placement puzzle without verdicts: material sanity check.
     let material = 0;
-    for (const { type, color } of Object.values(game.board()).flat().filter(Boolean)) {
-      material += (color === puzzle.player ? 1 : -1) * VALUES[type];
+    for (const piece of Object.values(map)) {
+      material += (piece.color === puzzle.player ? 1 : -1) * VALUES[piece.type];
     }
-    const placed = puzzle.place.reduce((sum, t) => sum + VALUES[t], 0);
-    if (material + placed < 3) {
-      fail(puzzle, `only ${material + placed} points of material advantage after placement — not clearly winnable`);
+    const placedValue = puzzle.place.reduce((sum, t) => sum + VALUES[t], 0);
+    if (material + placedValue < 3) {
+      fail(puzzle, `only ${material + placedValue} points of material advantage after placement — not clearly winnable`);
     }
   }
-}
 
-// Precomputed playout lines: every line must replay legally, reach a
-// terminal position, and agree with the square's verdict.
-let lineCount = 0;
-for (const puzzle of PUZZLES) {
-  if (!puzzle.lines) continue;
-  for (const [mode, bySquare] of Object.entries(puzzle.lines)) {
-    const turn = mode === 'own' ? puzzle.player : puzzle.player === 'w' ? 'b' : 'w';
-    const openSet = puzzle.p4 ?? puzzle.p5;
-    const winners = mode === 'own'
-      ? [puzzle.solution].filter(Boolean)
-      : openSet ? openSet.solutions : [puzzle.p3?.solution].filter(Boolean);
-    // Squares the player can actually reach in this mode; lines for blocked
-    // squares (e.g. added to exclusions by self-healing) are inert.
-    const blocked = mode === 'own'
-      ? puzzle.excluded ?? []
-      : openSet ? [] : puzzle.p3?.excluded ?? [];
-    for (const [sq, line] of Object.entries(bySquare)) {
-      if (blocked.includes(sq)) continue;
+  // ---- lines ----
+  if (puzzle.lines) {
+    // Which placements are actually reachable under the constraints?
+    for (const [sig, line] of Object.entries(puzzle.lines)) {
+      const parts = parseSignature(sig);
+      if (parts.some((p) => placementError(puzzle, p.square, p.type, map))) continue; // inert line
       lineCount++;
-      const map = fenToMap(puzzle.fen);
-      map[sq] = { type: puzzle.place[0], color: puzzle.player };
-      const g = new Chess(buildFen(map, turn));
       const moves = line.m.split(' ');
       if (line.e.split(' ').length !== moves.length) {
-        fail(puzzle, `line ${mode}/${sq}: evals/moves length mismatch`);
+        fail(puzzle, `line ${sig}: evals/moves length mismatch`);
       }
+      const g = new Chess(startFen(puzzle, parts));
       try {
         for (const uci of moves) {
           g.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] });
         }
       } catch (err) {
-        fail(puzzle, `line ${mode}/${sq}: illegal move in stored line (${err.message.slice(0, 60)})`);
+        fail(puzzle, `line ${sig}: illegal move (${err.message.slice(0, 60)})`);
         continue;
       }
-      if (!g.isGameOver()) { fail(puzzle, `line ${mode}/${sq}: does not reach a terminal position`); continue; }
-      const playerWon = g.isCheckmate() && g.turn() !== puzzle.player;
-      const shouldWin = winners.includes(sq);
-      if (playerWon !== shouldWin) {
-        fail(puzzle, `line ${mode}/${sq}: verdict mismatch (playerWon=${playerWon}, expected ${shouldWin ? 'win' : 'not-win'})`);
+      if (!g.isGameOver()) { fail(puzzle, `line ${sig}: does not reach a terminal position`); continue; }
+      if (puzzle.solutions) {
+        const playerWon = g.isCheckmate() && g.turn() !== puzzle.player;
+        const shouldWin = puzzle.solutions.includes(sig);
+        if (playerWon !== shouldWin) {
+          fail(puzzle, `line ${sig}: verdict mismatch (playerWon=${playerWon}, expected ${shouldWin ? 'win' : 'not-win'})`);
+        }
       }
     }
   }
@@ -180,4 +142,4 @@ if (failures) {
   console.error(`\n${failures} puzzle problem(s) found.`);
   process.exit(1);
 }
-console.log(`✓ All ${PUZZLES.length} puzzles are valid (${lineCount} playout lines verified).`);
+console.log(`✓ ${PUZZLES.length} puzzles across ${batches.length} batches are valid (${lineCount} playout lines verified).`);

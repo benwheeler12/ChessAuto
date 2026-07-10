@@ -16,7 +16,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "node scripts/validate-puzzles.mjs",
-    "generate": "node scripts/generate-puzzles.mjs",
+    "generate:gm": "node scripts/generate-puzzles.mjs",
+    "generate:outliers": "node scripts/generate-outliers.mjs",
     "generate:lines": "node scripts/generate-lines.mjs",
     "fetch:games": "node scripts/fetch-lichess-games.mjs",
     "analyze": "node scripts/analyze-positions.mjs"
