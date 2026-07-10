@@ -17,9 +17,23 @@ const DEFAULT_ANIM_MS = 50; // piece-slide duration (user-adjustable via slider)
 // verdict is visible, then pause for ◀ ▶ review before the fast finish.
 const PHASE1_PACE_MS = 1100; // deliberate per-move pace for the opening
 const PHASE1_ANIM_MS = 250; // minimum slide duration during phase 1
-const SWING_POINTS = 3; // material change that counts as "the game swung"
-const PHASE1_MAX_PLIES = 20; // pause here even if material never swings
+// A side "holds the material advantage" at 2+ points. Phase 1 pauses when
+// that STATE changes hands (even → ahead, ahead → even, …) — not on raw
+// swings, which would wrongly assume the starting material was level.
+const ADVANTAGE_POINTS = 2;
+const PHASE1_MAX_PLIES = 20; // pause after 10 moves even without a change
+const EVEN_CP = 100; // |eval| below this = "strategically even"
+const WINNING_CP = 250; // |eval| above this = "strategically winning"
 const PIECE_POINTS = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+
+/** Board slides for a move (castling moves the rook too). */
+function slidesFor(mv) {
+  const slides = [{ from: mv.from, to: mv.to }];
+  const homeRank = mv.color === 'w' ? 1 : 8;
+  if (mv.flags.includes('k')) slides.push({ from: `h${homeRank}`, to: `f${homeRank}` });
+  if (mv.flags.includes('q')) slides.push({ from: `a${homeRank}`, to: `d${homeRank}` });
+  return slides;
+}
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -49,6 +63,7 @@ const els = {
   stopBtn: $('stop-btn'),
   backBtn: $('back-btn'),
   fwdBtn: $('fwd-btn'),
+  replayBtn: $('replay-btn'),
   continueBtn: $('continue-btn'),
   retryBtn: $('retry-btn'),
   lichessBtn: $('lichess-btn'),
@@ -218,6 +233,7 @@ function refreshSetup() {
   els.stopBtn.classList.add('hidden');
   els.backBtn.classList.add('hidden');
   els.fwdBtn.classList.add('hidden');
+  els.replayBtn.classList.add('hidden');
   els.continueBtn.classList.add('hidden');
   els.retryBtn.classList.add('hidden');
   els.resetBtn.classList.remove('hidden');
@@ -421,6 +437,12 @@ async function play() {
   await playReveal();
   if (runId !== state.runId) return;
 
+  /** Red/green pop on the landing square when a move captures something. */
+  const flashCapture = (mv) => {
+    if (!mv.flags.includes('c') && !mv.flags.includes('e')) return;
+    board.captureFlash(mv.to, mv.color === state.puzzle.player ? 'good' : 'bad');
+  };
+
   /** Animate one buffered move onto the board at the given pace. */
   async function applyMove(item, paceMs, animMs) {
     const stepStart = performance.now();
@@ -431,12 +453,9 @@ async function play() {
     board.clearHighlights('last-move');
     board.highlight(mv.from, 'last-move');
     board.highlight(mv.to, 'last-move');
-    const slides = [{ from: mv.from, to: mv.to }];
-    const homeRank = mv.color === 'w' ? 1 : 8;
-    if (mv.flags.includes('k')) slides.push({ from: `h${homeRank}`, to: `f${homeRank}` });
-    if (mv.flags.includes('q')) slides.push({ from: `a${homeRank}`, to: `d${homeRank}` });
-    await board.animateMoves(slides, fenToMap(item.fen), animMs);
+    await board.animateMoves(slidesFor(mv), fenToMap(item.fen), animMs);
     if (runId !== state.runId) return;
+    flashCapture(mv);
     state.playoutFen = item.fen;
     appendMove(mv, item.moveNo);
     // Fifty-move rule watch: the FEN's halfmove clock counts plies since the
@@ -460,8 +479,12 @@ async function play() {
     }
     return state.puzzle.player === 'w' ? diff : -diff;
   };
-  const startMaterial = materialFor(fen);
-  const swingAt = (f) => materialFor(f) - startMaterial;
+  // Who holds the material advantage (2+ points) — the state phase 1 watches.
+  const advantageState = (f) => {
+    const diff = materialFor(f);
+    return diff >= ADVANTAGE_POINTS ? 'player' : diff <= -ADVANTAGE_POINTS ? 'opponent' : 'even';
+  };
+  const startState = advantageState(fen);
 
   /** Wait until n buffered moves are visible (or the game has ended). */
   const buffered = async (n) => {
@@ -472,10 +495,10 @@ async function play() {
     return queue.slice(0, n);
   };
 
-  // ---- Phase 1: play the opening slowly until the game visibly swings ----
+  // ---- Phase 1: play the opening slowly until the advantage changes hands ----
   setStatus('Playing the first moves slowly — watch how the position develops…');
   const history = []; // applied moves, for ◀ ▶ review
-  let pausedBySwing = false;
+  let pausedByAdvantage = false;
   let pausedByCap = false;
   while (true) {
     const ready = await buffered(1);
@@ -486,15 +509,14 @@ async function play() {
     if (runId !== state.runId) return;
     history.push(item);
 
-    const swing = swingAt(item.fen);
-    if (Math.abs(swing) >= SWING_POINTS) {
-      // Only pause on a SETTLED swing: mid-exchange material dips (QxP, pawn
+    const nowState = advantageState(item.fen);
+    if (nowState !== startState) {
+      // Only pause on a SETTLED change: mid-exchange material dips (QxP, pawn
       // recaptures the queen) shouldn't trip it, so peek two plies ahead.
       const ahead = await buffered(2);
       if (ahead === null || runId !== state.runId) return;
-      if (ahead.every((next) => Math.sign(swingAt(next.fen)) === Math.sign(swing)
-        && Math.abs(swingAt(next.fen)) >= SWING_POINTS)) {
-        pausedBySwing = true;
+      if (ahead.every((next) => advantageState(next.fen) === nowState)) {
+        pausedByAdvantage = true;
         break;
       }
     }
@@ -504,21 +526,56 @@ async function play() {
     }
   }
 
-  // ---- Review pause: ◀ ▶ step through phase 1, Continue for the finish ----
+  // ---- Review pause: ◀ ▶ ↺ step through phase 1, Continue for the finish ----
   const moreToPlay = queue.length > 0 || !producerDone;
-  if ((pausedBySwing || pausedByCap) && moreToPlay && history.length) {
+  if ((pausedByAdvantage || pausedByCap) && moreToPlay && history.length) {
     state.phase = 'paused';
     els.backBtn.classList.remove('hidden');
     els.fwdBtn.classList.remove('hidden');
+    els.replayBtn.classList.remove('hidden');
     els.continueBtn.classList.remove('hidden');
-    const swing = swingAt(history[history.length - 1].fen);
-    setStatus(pausedBySwing
-      ? (swing < 0
-        ? 'Your side just lost material — this is where it goes wrong. Step ◀ ▶ through the moves, then Continue.'
-        : 'Your side has won material! Step ◀ ▶ to review how, then press Continue.')
-      : `First ${Math.ceil(history.length / 2)} moves played with no material swing. Step ◀ ▶ to review, then Continue.`);
+
+    const last = history[history.length - 1];
+    if (pausedByAdvantage) {
+      const nowState = advantageState(last.fen);
+      const change = nowState === 'player'
+        ? (startState === 'opponent'
+          ? 'Complete turnaround — your side erased its material deficit and now holds the advantage!'
+          : 'Your side has won material — you now hold the material advantage.')
+        : nowState === 'opponent'
+          ? (startState === 'player'
+            ? 'Your material advantage is gone — your opponent holds one now.'
+            : 'Your side just lost material — your opponent now holds the material advantage.')
+          : startState === 'player'
+            ? 'Your side has lost its material advantage — material is now even.'
+            : 'Your side has erased the material deficit — material is now even.';
+      setStatus(`${change} Step ◀ ▶ or ↺ Replay to review, then Continue.`);
+    } else {
+      // Ten moves with no advantage change: let the engine's eval explain.
+      const playerCp = state.puzzle.player === 'w' ? last.whiteCp : -last.whiteCp;
+      const evalStr = (Math.abs(playerCp) >= 9000)
+        ? 'a forced mate'
+        : `${playerCp > 0 ? '+' : ''}${(playerCp / 100).toFixed(1)}`;
+      const moves = Math.ceil(history.length / 2);
+      const assessment = Math.abs(playerCp) < EVEN_CP
+        ? `${moves} moves in, the game is materially and strategically even.`
+        : playerCp >= WINNING_CP
+          ? `${moves} moves in, no material has changed hands — but your side is strategically winning (${evalStr}).`
+          : playerCp <= -WINNING_CP
+            ? `${moves} moves in, no material has changed hands — but your opponent is strategically winning (${evalStr}).`
+            : `${moves} moves in, material is level with a slight edge ${playerCp > 0 ? 'for your side' : 'for your opponent'} (${evalStr}).`;
+      setStatus(`${assessment} Step ◀ ▶ or ↺ Replay to review, then Continue.`);
+    }
 
     let reviewIdx = history.length - 1; // -1 = the constructed start position
+    let resume = false;
+    let replaying = false;
+    const syncButtons = () => {
+      els.backBtn.disabled = replaying || reviewIdx <= -1;
+      els.fwdBtn.disabled = replaying || reviewIdx >= history.length - 1;
+      els.replayBtn.disabled = replaying;
+      els.continueBtn.disabled = replaying;
+    };
     const showReview = () => {
       const shown = reviewIdx >= 0 ? history[reviewIdx] : null;
       board.setPosition(fenToMap(shown ? shown.fen : fen));
@@ -532,13 +589,41 @@ async function play() {
       els.progress.textContent = shown
         ? `Reviewing move ${reviewIdx + 1} of ${history.length}`
         : 'Reviewing the starting position';
+      syncButtons();
+    };
+    const replay = async () => {
+      if (replaying || resume) return;
+      replaying = true;
+      reviewIdx = -1;
+      showReview();
+      await sleep(700);
+      for (let i = 0; i < history.length; i++) {
+        if (runId !== state.runId || resume) break;
+        const item = history[i];
+        const stepStart = performance.now();
+        board.clearHighlights('last-move');
+        board.highlight(item.played.from, 'last-move');
+        board.highlight(item.played.to, 'last-move');
+        await board.animateMoves(slidesFor(item.played), fenToMap(item.fen), Math.max(PHASE1_ANIM_MS, moveAnimMs()));
+        if (runId !== state.runId) break;
+        flashCapture(item.played);
+        setEvalBar(item.whiteCp);
+        state.playoutFen = item.fen;
+        reviewIdx = i;
+        els.progress.textContent = `Reviewing move ${i + 1} of ${history.length}`;
+        const rest = Math.max(PHASE1_PACE_MS, movePaceMs()) - (performance.now() - stepStart);
+        if (rest > 0) await sleep(rest);
+      }
+      replaying = false;
+      syncButtons();
     };
 
-    let resume = false;
+    syncButtons();
     state.pauseControls = {
-      back: () => { if (reviewIdx > -1) { reviewIdx--; showReview(); } },
-      fwd: () => { if (reviewIdx < history.length - 1) { reviewIdx++; showReview(); } },
-      cont: () => { resume = true; },
+      back: () => { if (!replaying && reviewIdx > -1) { reviewIdx--; showReview(); } },
+      fwd: () => { if (!replaying && reviewIdx < history.length - 1) { reviewIdx++; showReview(); } },
+      replay,
+      cont: () => { if (!replaying) resume = true; },
     };
     while (!resume) {
       await sleep(60);
@@ -548,10 +633,10 @@ async function play() {
     state.phase = 'playing';
     els.backBtn.classList.add('hidden');
     els.fwdBtn.classList.add('hidden');
+    els.replayBtn.classList.add('hidden');
     els.continueBtn.classList.add('hidden');
     if (reviewIdx < history.length - 1) {
       // Snap back to the end of phase 1 before resuming.
-      const last = history[history.length - 1];
       board.setPosition(fenToMap(last.fen));
       board.clearHighlights('last-move');
       board.highlight(last.played.from, 'last-move');
@@ -667,6 +752,7 @@ function finish(game) {
   els.stopBtn.classList.add('hidden');
   els.backBtn.classList.add('hidden');
   els.fwdBtn.classList.add('hidden');
+  els.replayBtn.classList.add('hidden');
   els.continueBtn.classList.add('hidden');
   els.retryBtn.classList.remove('hidden');
   setStatus(win
@@ -838,6 +924,7 @@ els.resetBtn.addEventListener('click', resetPlacements);
 els.lichessBtn.addEventListener('click', openInLichess);
 els.backBtn.addEventListener('click', () => state.pauseControls?.back());
 els.fwdBtn.addEventListener('click', () => state.pauseControls?.fwd());
+els.replayBtn.addEventListener('click', () => state.pauseControls?.replay());
 els.continueBtn.addEventListener('click', () => state.pauseControls?.cont());
 els.speedSlider.value = localStorage.getItem('chessauto-speed') || String(DEFAULT_ANIM_MS);
 els.speedValue.textContent = `${els.speedSlider.value} ms`;

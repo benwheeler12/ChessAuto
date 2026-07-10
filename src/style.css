@@ -124,6 +124,31 @@ main {
   background-image: radial-gradient(circle, rgba(255, 210, 77, 0.85) 30%, transparent 32%);
 }
 
+/* Capture pop: a quick expanding ring where a piece was just taken */
+.capture-burst {
+  position: absolute;
+  inset: 6%;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 4;
+  animation: capture-pop 0.55s ease-out forwards;
+}
+.capture-burst.good {
+  border: 3px solid rgba(110, 220, 100, 0.95);
+  background: radial-gradient(circle, rgba(120, 230, 110, 0.4), transparent 62%);
+  box-shadow: 0 0 16px rgba(110, 220, 100, 0.7);
+}
+.capture-burst.bad {
+  border: 3px solid rgba(230, 80, 65, 0.95);
+  background: radial-gradient(circle, rgba(235, 90, 70, 0.4), transparent 62%);
+  box-shadow: 0 0 16px rgba(230, 80, 65, 0.7);
+}
+@keyframes capture-pop {
+  0% { transform: scale(0.35); opacity: 1; }
+  70% { opacity: 0.85; }
+  100% { transform: scale(1.45); opacity: 0; }
+}
+
 /* Placement-zone outlines: one traced border per island of allowed squares */
 .board .zone-layer {
   position: absolute;

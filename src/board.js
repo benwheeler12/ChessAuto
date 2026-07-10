@@ -146,6 +146,19 @@ export class Board {
     this.zoneEl = null;
   }
 
+  /**
+   * Quick expanding ring on a square when a capture lands there.
+   * kind: 'good' (green, our side captured) | 'bad' (red, we got captured).
+   */
+  captureFlash(square, kind) {
+    const cell = this.squares.get(square);
+    if (!cell) return;
+    const burst = document.createElement('div');
+    burst.className = `capture-burst ${kind}`;
+    cell.appendChild(burst);
+    burst.addEventListener('animationend', () => burst.remove(), { once: true });
+  }
+
   assignSquares() {
     this.squares.clear();
     const cells = this.el.children;
