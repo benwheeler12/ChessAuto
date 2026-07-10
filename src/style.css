@@ -453,6 +453,13 @@ button.primary { background: var(--accent); color: #14130f; flex: 1; }
 button.primary:not(:disabled):hover { background: var(--accent-2); }
 button.secondary { background: var(--panel-2); color: var(--text); }
 button.danger { background: var(--danger); color: #fff; flex: 1; }
+button.lichess-btn {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--panel-2);
+  font-weight: 500;
+}
+button.lichess-btn:hover { color: var(--text); border-color: var(--muted); }
 
 .progress { font-size: 0.85rem; color: var(--muted); }
 

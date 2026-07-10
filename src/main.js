@@ -1,6 +1,6 @@
 import '@fontsource-variable/inter';
 import '@fontsource-variable/space-grotesk';
-import { Chess } from 'chess.js';
+import { Chess, validateFen } from 'chess.js';
 import { COLLECTIONS } from './puzzles/index.js';
 import { Engine, scoreToWhiteCp } from './engine.js';
 import { Board, pieceClass } from './board.js';
@@ -40,6 +40,7 @@ const els = {
   playBtn: $('play-btn'),
   stopBtn: $('stop-btn'),
   retryBtn: $('retry-btn'),
+  lichessBtn: $('lichess-btn'),
   progress: $('progress'),
   movelist: $('movelist'),
   speedSlider: $('speed-slider'),
@@ -80,6 +81,7 @@ const state = {
   enginesReady: false,
   runId: 0,
   baseCp: 0,
+  playoutFen: null, // FEN currently shown on the board during/after a playout
 };
 
 const activePuzzles = () => COLLECTIONS[state.collection].puzzles;
@@ -332,6 +334,7 @@ async function play() {
   board.clearHighlights('hint', 'bad', 'selected', 'option', 'excluded');
 
   const fen = startFen(state.puzzle, placements());
+  state.playoutFen = fen;
   const game = new Chess(fen);
   const uciMoves = []; // full history so the engines can see repetitions
   let plies = 0;
@@ -423,6 +426,7 @@ async function play() {
     if (mv.flags.includes('q')) slides.push({ from: `a${homeRank}`, to: `d${homeRank}` });
     await board.animateMoves(slides, fenToMap(item.fen), moveAnimMs());
     if (runId !== state.runId) return;
+    state.playoutFen = item.fen;
     appendMove(mv, item.moveNo);
     els.progress.textContent = `Move ${Math.ceil(plies / 2)}`;
 
@@ -608,6 +612,23 @@ function backToSetup() {
 
 // ---- Misc UI ----
 
+/** The FEN of whatever the board is showing right now. */
+function viewFen() {
+  if (state.phase !== 'setup' && state.playoutFen) return state.playoutFen;
+  return buildFen(currentMap(), turnFor(state.puzzle));
+}
+
+/**
+ * Open the current position in the Lichess analysis board. Positions that
+ * aren't legal chess yet (e.g. a king puzzle before the king is placed) go
+ * to the board editor instead.
+ */
+function openInLichess() {
+  const fen = viewFen();
+  const path = validateFen(fen).ok ? 'analysis/standard' : 'editor';
+  window.open(`https://lichess.org/${path}/${fen.replace(/ /g, '_')}`, '_blank', 'noopener');
+}
+
 function setStatus(text, isError = false) {
   els.status.textContent = text;
   els.status.classList.toggle('error', isError);
@@ -669,6 +690,7 @@ els.playBtn.addEventListener('click', play);
 els.stopBtn.addEventListener('click', stopPlayout);
 els.retryBtn.addEventListener('click', backToSetup);
 els.resetBtn.addEventListener('click', resetPlacements);
+els.lichessBtn.addEventListener('click', openInLichess);
 els.speedSlider.value = localStorage.getItem('chessauto-speed') || String(DEFAULT_ANIM_MS);
 els.speedValue.textContent = `${els.speedSlider.value} ms`;
 els.speedSlider.addEventListener('input', () => {
