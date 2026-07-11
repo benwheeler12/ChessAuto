@@ -141,3 +141,82 @@ export function enumerateCombos(types, empties, cap = 400) {
   recur(0, [], new Set());
   return out;
 }
+
+/**
+ * Clusters of coordinated pieces: groups of `size` non-king pieces of one
+ * color connected by defense relations (one piece guards another's square)
+ * or direct adjacency. Scored by mutual defenses, enemy contact, and piece-
+ * type diversity (distinct types make richer placement assignments).
+ * @returns {{squares: string[], types: string[], score: number,
+ *            defenses: number}[]} top clusters, best first
+ * @cost ~1ms — one attackers() call per piece plus subset enumeration
+ */
+export function defenseClusters(map, fen, player, { size = 3, top = 3 } = {}) {
+  const game = new Chess(fen);
+  const opponent = player === 'w' ? 'b' : 'w';
+  const squares = Object.keys(map).filter((sq) => map[sq].color === player && map[sq].type !== 'k');
+  if (squares.length < size) return [];
+
+  const own = new Set(squares);
+  const defense = new Map(squares.map((sq) => [sq, new Set()]));
+  const near = new Map(squares.map((sq) => [sq, new Set()]));
+  for (const sq of squares) {
+    for (const guard of game.attackers(sq, player)) {
+      if (!own.has(guard)) continue; // kings and pawns off-map don't cluster
+      defense.get(sq).add(guard);
+      defense.get(guard).add(sq);
+    }
+    for (const other of squares) {
+      if (other === sq) continue;
+      const df = Math.abs(sq.charCodeAt(0) - other.charCodeAt(0));
+      const dr = Math.abs(Number(sq[1]) - Number(other[1]));
+      if (Math.max(df, dr) <= 1) near.get(sq).add(other);
+    }
+  }
+  const connected = (subset) => {
+    const seen = new Set([subset[0]]);
+    const stack = [subset[0]];
+    while (stack.length) {
+      const cur = stack.pop();
+      for (const nb of subset) {
+        if (seen.has(nb)) continue;
+        if (defense.get(cur).has(nb) || near.get(cur).has(nb)) {
+          seen.add(nb);
+          stack.push(nb);
+        }
+      }
+    }
+    return seen.size === subset.length;
+  };
+
+  const clusters = [];
+  const pick = (start, chosen) => {
+    if (chosen.length === size) {
+      if (!connected(chosen)) return;
+      let defenses = 0;
+      let contacts = 0;
+      for (let i = 0; i < chosen.length; i++) {
+        if (game.isAttacked(chosen[i], opponent)) contacts++;
+        for (let j = i + 1; j < chosen.length; j++) {
+          if (defense.get(chosen[i]).has(chosen[j])) defenses++;
+        }
+      }
+      const types = chosen.map((sq) => map[sq].type);
+      const distinct = new Set(types).size;
+      clusters.push({
+        squares: [...chosen],
+        types,
+        defenses,
+        score: defenses * 3 + contacts * 2 + distinct * 2,
+      });
+      return;
+    }
+    for (let i = start; i < squares.length; i++) {
+      chosen.push(squares[i]);
+      pick(i + 1, chosen);
+      chosen.pop();
+    }
+  };
+  pick(0, []);
+  return clusters.sort((a, b) => b.score - a.score).slice(0, top);
+}

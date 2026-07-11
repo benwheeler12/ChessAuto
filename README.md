@@ -136,6 +136,14 @@ redirects output for dry runs, `--pool N` sizes the engine pool, and
   qualifies them under open-board rules: opponent moves first, at most two
   placements on the whole board win. Positions already used by any existing
   batch are skipped automatically.
+- `npm run generate:spots -- --label "…"` (`scripts/generate-spots.mjs`)
+  — **exact spots**: a coordinated cluster of the player's pieces
+  (mutually defending / adjacent, via `detectors.defenseClusters`) leaves
+  the board and its original squares become the only allowed spots. As
+  many pieces in the tray as spots on the board; exactly ONE arrangement
+  wins, and every wrong arrangement is verified to be at best equal.
+  Selection favors sharp positions where the player is even or behind in
+  material, so the win lives in the coordination being restored.
 - `npm run generate:sectors -- --label "…"` (`scripts/generate-sectors.mjs`)
   — 3×3 **sector builds**: from positions where the player is winning but
   the opponent moves first, it finds a tactically hot 3×3 zone (pieces of
