@@ -89,6 +89,7 @@ main {
 .square.bad { box-shadow: inset 0 0 0 999px var(--sq-bad); }
 .square.last-move { box-shadow: inset 0 0 0 999px var(--sq-move); }
 .square.selected { outline: 3px solid #ffd24d; outline-offset: -3px; }
+.piece.placed:active { cursor: grabbing; }
 
 /* Coordinate labels on the edge squares */
 .square::before {

@@ -115,6 +115,15 @@ const board = new Board(els.board, {
     state.selectedTray = trayIndex;
     placeSelected(square);
   },
+  onMovePiece: (from, to) => movePlaced(from, to),
+});
+
+// The tray doubles as a drop target: drag a placed piece back to unplace it.
+els.tray.addEventListener('dragover', (e) => e.preventDefault());
+els.tray.addEventListener('drop', (e) => {
+  e.preventDefault();
+  const from = e.dataTransfer.getData('text/from-square');
+  if (from) returnToTray(from);
 });
 
 // ---- Setup phase ----
@@ -209,6 +218,9 @@ function refreshSetup() {
   for (const sq of puzzle.placement?.blocked ?? []) {
     board.highlight(sq, 'excluded');
   }
+  // A placed piece selected in place keeps a visible ring until it moves.
+  const selectedItem = state.tray[state.selectedTray];
+  if (selectedItem?.square) board.highlight(selectedItem.square, 'selected');
 
   let error = null;
   if (remaining === 0) error = startPositionError(puzzle, placements());
@@ -234,8 +246,8 @@ function refreshSetup() {
     setStatus(setupHint(puzzle, remaining));
   } else {
     setStatus(puzzle.place.length === 1
-      ? 'Piece placed — press “Play it out”, or click it to try a different square.'
-      : 'Position set! Press “Play it out” and the engines will battle it out.');
+      ? 'Piece placed — press “Play it out”, or click/drag it to a different square.'
+      : 'Position set! Press “Play it out” — or click/drag a piece to rearrange.');
   }
 }
 
@@ -295,19 +307,34 @@ function renderTray() {
 function handleSquareClick(square) {
   if (state.phase !== 'setup') return;
   const placedIdx = state.tray.findIndex((t) => t.square === square);
-  if (placedIdx >= 0 && state.selectedTray === -1) {
-    state.tray[placedIdx].square = null;
-    state.selectedTray = placedIdx;
+  if (placedIdx >= 0) {
+    // Clicking a placed piece selects it IN PLACE (click again to deselect,
+    // click another placed piece to switch); the next square click moves it.
+    state.selectedTray = state.selectedTray === placedIdx ? -1 : placedIdx;
     refreshSetup();
+    if (state.selectedTray >= 0) {
+      setStatus(`Now click a new square for your ${pieceName(state.tray[placedIdx].type)} — or drag it there.`);
+    }
     return;
   }
   if (state.selectedTray >= 0) placeSelected(square);
 }
 
+/** Board occupancy as placementError expects it, minus one moving piece. */
+function occupiedExcept(item) {
+  const map = { ...state.baseMap };
+  for (const p of state.tray) {
+    if (p !== item && p.square) map[p.square] = { type: p.type, color: state.puzzle.player, placed: true };
+  }
+  return map;
+}
+
 function placeSelected(square) {
   const item = state.tray[state.selectedTray];
   if (!item || state.phase !== 'setup') return;
-  const error = placementError(state.puzzle, square, item.type, currentMap());
+  // Validate against the board WITHOUT the moving piece, so relocating a
+  // placed piece isn't blocked by its own old square's constraints.
+  const error = placementError(state.puzzle, square, item.type, occupiedExcept(item));
   if (error) {
     setStatus(error, true);
     return;
@@ -319,6 +346,30 @@ function placeSelected(square) {
   if (allPlaced() && startPositionError(state.puzzle, placements())) {
     board.highlight(square, 'bad');
   }
+}
+
+/** Drag a placed piece to another square (validated like a click-move). */
+function movePlaced(fromSquare, toSquare) {
+  if (state.phase !== 'setup' || fromSquare === toSquare) return;
+  const idx = state.tray.findIndex((t) => t.square === fromSquare);
+  if (idx < 0) return;
+  state.selectedTray = idx;
+  placeSelected(toSquare);
+  if (state.tray[idx].square === fromSquare) {
+    // The move was refused: drop the selection the drag implied, but leave
+    // the refusal message on screen (nothing was rendered as selected).
+    state.selectedTray = -1;
+  }
+}
+
+/** Drag a placed piece back to the tray to unplace it. */
+function returnToTray(fromSquare) {
+  if (state.phase !== 'setup') return;
+  const idx = state.tray.findIndex((t) => t.square === fromSquare);
+  if (idx < 0) return;
+  state.tray[idx].square = null;
+  state.selectedTray = -1;
+  refreshSetup();
 }
 
 function resetPlacements() {

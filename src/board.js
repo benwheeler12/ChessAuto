@@ -93,8 +93,14 @@ export class Board {
       cell.addEventListener('dragover', (e) => e.preventDefault());
       cell.addEventListener('drop', (e) => {
         e.preventDefault();
+        if (!cell.dataset.square) return;
+        const from = e.dataTransfer.getData('text/from-square');
+        if (from) {
+          this.handlers.onMovePiece?.(from, cell.dataset.square);
+          return;
+        }
         const idx = e.dataTransfer.getData('text/tray-index');
-        if (idx !== '' && cell.dataset.square) {
+        if (idx !== '') {
           this.handlers.onDropPiece?.(Number(idx), cell.dataset.square);
         }
       });
@@ -198,6 +204,16 @@ export class Board {
         cell.appendChild(span);
       }
       span.className = `piece ${pieceClass(piece.color, piece.type)}${piece.placed ? ' placed' : ''}`;
+      // Placed (user-owned) pieces can be dragged to another square or back
+      // to the tray. ondragstart (not addEventListener) so span reuse across
+      // setPosition calls never stacks handlers.
+      span.draggable = Boolean(piece.placed);
+      span.ondragstart = piece.placed
+        ? (e) => {
+          e.dataTransfer.setData('text/from-square', name);
+          e.dataTransfer.effectAllowed = 'move';
+        }
+        : null;
     }
   }
 
