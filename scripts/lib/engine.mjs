@@ -52,10 +52,9 @@ export class EnginePool {
     const slot = this.workers.reduce((a, b) => (a.pending <= b.pending ? a : b));
     slot.pending++;
     this.calls++;
-    const started = performance.now();
     return new Promise((resolve) => {
       this.waiters.set(req.id, (msg) => {
-        this.engineMs += performance.now() - started;
+        this.engineMs += msg.ms ?? 0; // measured inside the worker: no queue wait
         resolve(msg);
       });
       slot.worker.send(req);

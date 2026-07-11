@@ -22,6 +22,7 @@ engine.sendCommand('setoption name Hash value 64');
 await command('isready', (l) => l === 'readyok');
 
 async function search({ fen, moves = [], movetime }) {
+  const started = performance.now();
   let score = 0;
   engine.sendCommand(`position fen ${fen}${moves.length ? ` moves ${moves.join(' ')}` : ''}`);
   const bestmove = await command(`go movetime ${movetime}`, (line) => {
@@ -33,14 +34,14 @@ async function search({ fen, moves = [], movetime }) {
     }
     return line.startsWith('bestmove');
   });
-  return { score, uci: bestmove.split(/\s+/)[1] };
+  return { score, uci: bestmove.split(/\s+/)[1], ms: performance.now() - started };
 }
 
 let chain = Promise.resolve();
 process.send({ ready: true });
 process.on('message', (req) => {
   chain = chain.then(async () => {
-    const { score, uci } = await search(req);
-    process.send({ id: req.id, score, uci: req.wantMove ? uci : undefined });
+    const { score, uci, ms } = await search(req);
+    process.send({ id: req.id, score, ms, uci: req.wantMove ? uci : undefined });
   });
 });

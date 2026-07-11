@@ -82,10 +82,46 @@ isolation headers are required.
   validates shapes, placement constraints, solution legality, and replays
   every stored line to confirm it agrees with its verdict.
 
+## Generation libraries and the cost model
+
+Puzzle generation is a set of stateless libraries under `scripts/lib/`,
+composed by thin CLI scripts — one Node program per run, everything in
+memory (no intermediate files between stages):
+
+- **`features.mjs`** — static position features as per-feature functions
+  (`material`, `attacks` (tension/contacts/hanging), `pins`, `kingSafety`,
+  `passedPawns`, `mobility`) plus `allFeatures()`. All engine-free,
+  micro­seconds each; `mobility` dominates at ~3.4ms (two full move
+  generations), so `allFeatures` ≈ 3.6ms/position.
+- **`corpus.mjs`** — PGN splitting/parsing (`readCorpus`) and in-memory
+  position sampling (`samplePositions`), ~3ms/game + ~30µs/ply.
+- **`detectors.mjs`** — candidate finders: `hotSectors` (~150µs),
+  `legalPlacements` (~4ms for a full-board scan), `removablePieces`,
+  `enumerateCombos` (capped).
+- **`engine.mjs`** — `EnginePool`: N Stockfish instances in forked child
+  processes behind one async API (`evaluate`, `bestMove`), least-busy
+  dispatch. `stats()` reports actual call counts and engine-ms per run.
+  A call costs its movetime + ~10ms; throughput scales with pool size.
+- **`qualify.mjs`** — engine-bound building blocks taking the pool as an
+  argument: `evaluatePlayer`, `scanPlacements` (parallel batch scoring),
+  `playLine` (verdict-checked playouts with a movetime retry ladder).
+- **`pipeline.mjs`** — feature rows with a transparent `.jsonl` cache and
+  stage timing logs; **`batches.mjs`** — immutable batch read/write.
+
+Every exported function documents its measured cost; `npm run bench`
+re-measures them on a corpus sample (add `--engine` for engine-call
+benchmarks) so pipeline estimates stay honest:
+**stage cost ≈ positions × Σ(static µs) + engine calls × movetime ÷ pool size.**
+Engine calls dominate everything: one deep eval (700ms) costs as much as
+~200 fully-featured static positions.
+
 ## Generators
 
-Both generators mine real games, qualify positions with engine verification,
-and ship a new batch (they require `--label "…"`, shown in the dropdown):
+The generator CLIs are thin compositions over those libraries. Each mines
+real games, qualifies positions with engine verification, and ships a new
+batch (they require `--label "…"`, shown in the dropdown; `--out-dir`
+redirects output for dry runs, `--pool N` sizes the engine pool, and
+`--features <cache.jsonl>` reuses/creates a feature cache):
 
 - `npm run generate:gm -- --label "…"` (`scripts/generate-puzzles.mjs`) —
   replays PGNs in `data/games.pgn` (famous public-domain games), removes one
