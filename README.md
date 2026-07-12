@@ -160,6 +160,22 @@ placement's verdict; stubborn disagreements are self-healed in the batch
 (square blocked / solution removed / puzzle dropped). With lines shipped the
 playout needs no runtime Stockfish and results are deterministic.
 
+## The playtest-feedback loop
+
+Every puzzle has a review box in the app (and the 👍/👎 on the verdict
+banner syncs too). Reviews flow to a Vercel Blob store via
+`api/review.js`; a daily Claude Code session reads them back through the
+secret-gated `api/reviews.js`, digests the feedback into a proposed
+pipeline change, and waits for approval before implementing it and
+shipping a new batch. `data/review-cursor.json` records the last review
+the loop has processed.
+
+One-time setup in the Vercel project: create a **Blob** store under
+Storage and connect it (adds `BLOB_READ_WRITE_TOKEN`), and add a
+`REVIEWS_READ_SECRET` env var (any long random string). The same secret
+goes into the Claude Code environment so the daily job can call
+`GET /api/reviews?since=<cursor>` with `Authorization: Bearer <secret>`.
+
 ## Puzzle lab (feature analysis)
 
 Groundwork for discovering what makes positions *fun* as puzzles:

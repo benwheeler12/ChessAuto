@@ -53,6 +53,8 @@ const els = {
   continueBtn: $('continue-btn'),
   retryBtn: $('retry-btn'),
   lichessBtn: $('lichess-btn'),
+  reviewText: $('review-text'),
+  reviewSend: $('review-send'),
   progress: $('progress'),
   movelist: $('movelist'),
   speedSlider: $('speed-slider'),
@@ -80,6 +82,55 @@ function ratePuzzle(id, value) {
   ratings[id] = ratings[id] === value ? undefined : value;
   if (ratings[id] === undefined) delete ratings[id];
   localStorage.setItem('chessauto-ratings', JSON.stringify(ratings));
+  // Sync the rating to the review store (fire-and-forget) so thumbs count
+  // as feedback even without a written review.
+  if (ratings[id] != null) postReview({ puzzleId: id, rating: ratings[id], text: '' });
+}
+
+// ---- Cloud reviews (the playtest-feedback loop's input) ----
+const clientId = (() => {
+  let id = localStorage.getItem('chessauto-client');
+  if (!id) {
+    id = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+    localStorage.setItem('chessauto-client', id);
+  }
+  return id;
+})();
+
+/** POST one review; resolves true on success. Silently tolerant of failure
+ * (the API only exists on the deployed site, not in local dev). */
+async function postReview({ puzzleId, rating = null, text = '' }) {
+  const batchId = activePuzzles().find((p) => p.id === puzzleId)?.meta?.batch?.id ?? null;
+  try {
+    const res = await fetch('/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ puzzleId, batchId, rating, text, clientId }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function sendReviewText() {
+  const text = els.reviewText.value.trim();
+  if (!text) return;
+  els.reviewSend.disabled = true;
+  els.reviewSend.textContent = 'Sending…';
+  const ok = await postReview({
+    puzzleId: state.puzzle.id,
+    rating: ratings[state.puzzle.id] ?? null,
+    text,
+  });
+  els.reviewSend.disabled = false;
+  els.reviewSend.textContent = 'Send review';
+  if (ok) {
+    els.reviewText.value = '';
+    setStatus('Review sent — thank you! It feeds the next batch of puzzles.');
+  } else {
+    setStatus('Couldn’t send the review — are you on the deployed site?', true);
+  }
 }
 
 // ---- State ----
@@ -136,6 +187,7 @@ function loadPuzzle(index) {
   els.movelist.innerHTML = '';
   els.banner.classList.add('hidden');
   els.progress.classList.add('hidden');
+  els.reviewText.value = '';
   board.setOrientation(puzzle.player);
   showBaseEval();
   refreshSetup();
@@ -1052,6 +1104,7 @@ els.lichessBtn.addEventListener('click', openInLichess);
 els.backBtn.addEventListener('click', () => state.pauseControls?.back());
 els.fwdBtn.addEventListener('click', () => state.pauseControls?.fwd());
 els.continueBtn.addEventListener('click', () => state.pauseControls?.cont());
+els.reviewSend.addEventListener('click', sendReviewText);
 document.addEventListener('keydown', (e) => {
   if (state.pauseControls) {
     if (e.key === 'ArrowLeft') { e.preventDefault(); state.pauseControls.back(); }

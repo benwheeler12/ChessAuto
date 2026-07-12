@@ -121,6 +121,23 @@ main {
 .piece.placed,
 .tray-piece { touch-action: none; }
 
+/* Per-puzzle review box (feeds the daily playtest-feedback loop) */
+.review-box { display: flex; flex-direction: column; gap: 0.4rem; }
+.review-box textarea {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem;
+  font: inherit;
+  font-size: 0.88rem;
+  resize: vertical;
+  min-height: 2.6rem;
+}
+.review-box textarea:focus { outline: none; border-color: var(--accent); }
+.review-box button { align-self: flex-end; padding: 0.4rem 0.8rem; border: none; border-radius: 8px; background: var(--panel-2); color: var(--text); font-weight: 600; cursor: pointer; }
+.review-box button:disabled { opacity: 0.45; cursor: default; }
+
 /* Coordinate labels on the edge squares */
 .square::before {
   content: attr(data-rank-label);
