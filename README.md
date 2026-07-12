@@ -171,10 +171,13 @@ shipping a new batch. `data/review-cursor.json` records the last review
 the loop has processed.
 
 One-time setup in the Vercel project: create a **Blob** store under
-Storage and connect it (adds `BLOB_READ_WRITE_TOKEN`), and add a
-`REVIEWS_READ_SECRET` env var (any long random string). The same secret
-goes into the Claude Code environment so the daily job can call
-`GET /api/reviews?since=<cursor>` with `Authorization: Bearer <secret>`.
+Storage and connect it — newer stores add `BLOB_STORE_ID` and rely on
+the `VERCEL_OIDC_TOKEN` Vercel injects into functions at runtime (older
+stores add `BLOB_READ_WRITE_TOKEN`; the SDK accepts either). Then add a
+`REVIEWS_READ_SECRET` env var (any long random string) and redeploy.
+The same secret goes into the Claude Code environment so the daily job
+can call `GET /api/reviews?since=<cursor>` with
+`Authorization: Bearer <secret>`.
 
 ## Puzzle lab (feature analysis)
 
