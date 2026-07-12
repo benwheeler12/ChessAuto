@@ -15,6 +15,14 @@ export default async function handler(req, res) {
   }
   const since = typeof req.query.since === 'string' ? req.query.since : '';
 
+  try {
+    return res.status(200).json(await collect(since));
+  } catch (err) {
+    return res.status(500).json({ error: `blob list failed: ${err.message}` });
+  }
+}
+
+async function collect(since) {
   const reviews = [];
   let cursor;
   do {
@@ -29,8 +37,8 @@ export default async function handler(req, res) {
   } while (cursor);
 
   reviews.sort((a, b) => (a.key < b.key ? -1 : 1));
-  return res.status(200).json({
+  return {
     reviews,
     cursor: reviews.length ? reviews[reviews.length - 1].key : (since || null),
-  });
+  };
 }

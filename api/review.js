@@ -35,9 +35,15 @@ export default async function handler(req, res) {
     createdAt: new Date().toISOString(),
   };
   const key = `reviews/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
-  await put(key, JSON.stringify(review), {
-    access: 'public', // unguessable URL; the listing itself is token-gated
-    contentType: 'application/json',
-  });
+  try {
+    await put(key, JSON.stringify(review), {
+      access: 'public', // unguessable URL; the listing itself is token-gated
+      contentType: 'application/json',
+    });
+  } catch (err) {
+    // Surface storage problems as JSON so misconfiguration is diagnosable
+    // from the client instead of an opaque FUNCTION_INVOCATION_FAILED.
+    return res.status(500).json({ error: `blob write failed: ${err.message}` });
+  }
   return res.status(200).json({ ok: true });
 }
