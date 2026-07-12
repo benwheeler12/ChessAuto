@@ -5,7 +5,24 @@
 // caller persists the last processed key as its cursor — see
 // data/review-cursor.json in the repo.
 
-import { list } from '@vercel/blob';
+import { list, get } from '@vercel/blob';
+
+/** Read a blob's JSON regardless of store access mode: private stores go
+ * through get(); public stores fall back to the plain URL. */
+async function readBlobJson(blob) {
+  try {
+    const result = await get(blob.pathname, { access: 'private' });
+    if (result?.statusCode === 200) {
+      return JSON.parse(await new Response(result.stream).text());
+    }
+  } catch { /* not a private store — fall through */ }
+  try {
+    const res = await fetch(blob.url);
+    return res.ok ? await res.json() : null;
+  } catch {
+    return null;
+  }
+}
 
 export default async function handler(req, res) {
   const auth = req.headers.authorization ?? '';
@@ -30,7 +47,7 @@ async function collect(since) {
     for (const blob of page.blobs) {
       const key = blob.pathname.slice('reviews/'.length);
       if (since && key <= since) continue;
-      const data = await fetch(blob.url).then((r) => r.json()).catch(() => null);
+      const data = await readBlobJson(blob);
       if (data) reviews.push({ ...data, key });
     }
     cursor = page.cursor;

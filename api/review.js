@@ -6,6 +6,19 @@
 
 import { put } from '@vercel/blob';
 
+/** Write with whichever access mode this store supports (newer stores are
+ * private; legacy stores are public-only). */
+async function putAdaptive(key, body, contentType) {
+  try {
+    return await put(key, body, { access: 'private', contentType });
+  } catch (err) {
+    if (/public store/i.test(err.message ?? '')) {
+      return put(key, body, { access: 'public', contentType });
+    }
+    throw err;
+  }
+}
+
 const MAX_TEXT = 1000;
 
 export default async function handler(req, res) {
@@ -36,10 +49,7 @@ export default async function handler(req, res) {
   };
   const key = `reviews/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
   try {
-    await put(key, JSON.stringify(review), {
-      access: 'public', // unguessable URL; the listing itself is token-gated
-      contentType: 'application/json',
-    });
+    await putAdaptive(key, JSON.stringify(review), 'application/json');
   } catch (err) {
     // Surface storage problems as JSON so misconfiguration is diagnosable
     // from the client instead of an opaque FUNCTION_INVOCATION_FAILED.
