@@ -1,0 +1,4 @@
+{
+  "cursor": null,
+  "note": "Last review key processed by the daily feedback-digest job (see /api/reviews). The job advances this and commits it alongside the batch it generates."
+}
