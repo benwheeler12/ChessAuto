@@ -109,22 +109,7 @@ const allPlaced = () => state.tray.every((t) => t.square);
 const whiteEngine = new Engine('white');
 const blackEngine = new Engine('black');
 
-const board = new Board(els.board, {
-  onSquareClick: handleSquareClick,
-  onDropPiece: (trayIndex, square) => {
-    state.selectedTray = trayIndex;
-    placeSelected(square);
-  },
-  onMovePiece: (from, to) => movePlaced(from, to),
-});
-
-// The tray doubles as a drop target: drag a placed piece back to unplace it.
-els.tray.addEventListener('dragover', (e) => e.preventDefault());
-els.tray.addEventListener('drop', (e) => {
-  e.preventDefault();
-  const from = e.dataTransfer.getData('text/from-square');
-  if (from) returnToTray(from);
-});
+const board = new Board(els.board, { onSquareClick: handleSquareClick });
 
 // ---- Setup phase ----
 
@@ -136,6 +121,7 @@ function loadPuzzle(index) {
   state.baseMap = fenToMap(puzzle.fen);
   state.tray = puzzle.place.map((type) => ({ type, square: null }));
   state.selectedTray = -1;
+  undoStack.length = 0;
 
   els.puzzleSelect.value = String(index);
   els.puzzleName.textContent = puzzle.name;
@@ -195,7 +181,7 @@ function currentMap() {
 function refreshSetup() {
   const puzzle = state.puzzle;
   board.setPosition(currentMap());
-  board.clearHighlights('hint', 'bad', 'last-move', 'selected', 'option', 'excluded');
+  board.clearHighlights('hint', 'bad', 'last-move', 'selected', 'option', 'excluded', 'illegal');
   renderTray();
 
   const remaining = state.tray.filter((t) => !t.square).length;
@@ -217,6 +203,15 @@ function refreshSetup() {
   }
   for (const sq of puzzle.placement?.blocked ?? []) {
     board.highlight(sq, 'excluded');
+  }
+  // Selecting a pawn dims the back ranks it can never stand on.
+  const selectedType = state.tray[state.selectedTray]?.type;
+  if (selectedType === 'p') {
+    for (const file of 'abcdefgh') {
+      for (const rank of [1, 8]) {
+        if (!map[file + rank]) board.highlight(file + rank, 'illegal');
+      }
+    }
   }
   // A placed piece selected in place keeps a visible ring until it moves.
   const selectedItem = state.tray[state.selectedTray];
@@ -287,7 +282,7 @@ function renderTray() {
     if (item.square) return;
     const div = document.createElement('div');
     div.className = `tray-piece ${pieceClass(state.puzzle.player, item.type)}`;
-    div.draggable = true;
+    div.dataset.index = String(i); // the pointer-drag engine reads this
     div.title = `Place your ${pieceName(item.type)}`;
     if (i === state.selectedTray) div.classList.add('selected');
     div.addEventListener('click', () => {
@@ -297,9 +292,6 @@ function renderTray() {
         setStatus(`Now click an empty square for your ${pieceName(item.type)}.`);
       }
     });
-    div.addEventListener('dragstart', (e) => {
-      e.dataTransfer.setData('text/tray-index', String(i));
-    });
     els.tray.appendChild(div);
   });
 }
@@ -308,73 +300,244 @@ function handleSquareClick(square) {
   if (state.phase !== 'setup') return;
   const placedIdx = state.tray.findIndex((t) => t.square === square);
   if (placedIdx >= 0) {
-    // Clicking a placed piece selects it IN PLACE (click again to deselect,
-    // click another placed piece to switch); the next square click moves it.
-    state.selectedTray = state.selectedTray === placedIdx ? -1 : placedIdx;
-    refreshSetup();
-    if (state.selectedTray >= 0) {
-      setStatus(`Now click a new square for your ${pieceName(state.tray[placedIdx].type)} — or drag it there.`);
+    if (state.selectedTray === placedIdx) {
+      state.selectedTray = -1; // clicking the selected piece deselects it
+      refreshSetup();
+      return;
     }
+    if (state.selectedTray >= 0) {
+      placeSelected(square); // onto another placed piece = swap/exchange
+      return;
+    }
+    // Nothing selected: select the placed piece IN PLACE.
+    state.selectedTray = placedIdx;
+    refreshSetup();
+    setStatus(`Now click a new square for your ${pieceName(state.tray[placedIdx].type)} — `
+      + 'click another placed piece to swap, or drag it anywhere.');
     return;
   }
   if (state.selectedTray >= 0) placeSelected(square);
 }
 
-/** Board occupancy as placementError expects it, minus one moving piece. */
-function occupiedExcept(item) {
+/** Board occupancy as placementError expects it, minus the given pieces. */
+function occupiedExcept(...items) {
   const map = { ...state.baseMap };
   for (const p of state.tray) {
-    if (p !== item && p.square) map[p.square] = { type: p.type, color: state.puzzle.player, placed: true };
+    if (!items.includes(p) && p.square) map[p.square] = { type: p.type, color: state.puzzle.player, placed: true };
   }
   return map;
 }
 
-function placeSelected(square) {
+// ---- Placement undo (Ctrl/Cmd+Z) ----
+const undoStack = [];
+function pushUndo() {
+  undoStack.push(state.tray.map((t) => t.square));
+  if (undoStack.length > 60) undoStack.shift();
+}
+function undoPlacement() {
+  const prev = undoStack.pop();
+  if (!prev || state.phase !== 'setup') return;
+  prev.forEach((sq, i) => { state.tray[i].square = sq; });
+  state.selectedTray = -1;
+  refreshSetup();
+}
+
+/**
+ * Place the selected piece on `square`. If another PLACED piece is there,
+ * the two exchange: it takes the mover's old square (a swap), or returns to
+ * the tray when the mover came from the tray. Click-moves of an already-
+ * placed piece slide (animate); drag-drops land instantly.
+ */
+async function placeSelected(square, { animate = true } = {}) {
   const item = state.tray[state.selectedTray];
   if (!item || state.phase !== 'setup') return;
-  // Validate against the board WITHOUT the moving piece, so relocating a
-  // placed piece isn't blocked by its own old square's constraints.
-  const error = placementError(state.puzzle, square, item.type, occupiedExcept(item));
+  const fromSquare = item.square;
+  if (square === fromSquare) {
+    state.selectedTray = -1;
+    refreshSetup();
+    return;
+  }
+  const target = state.tray.find((t) => t !== item && t.square === square) ?? null;
+  // Validate against the board without the pieces that are moving.
+  const occupied = occupiedExcept(item, ...(target ? [target] : []));
+  const error = placementError(state.puzzle, square, item.type, occupied);
   if (error) {
     setStatus(error, true);
     return;
   }
+  if (target && fromSquare) {
+    const swapError = placementError(state.puzzle, fromSquare, target.type, occupied);
+    if (swapError) {
+      setStatus(`Can’t swap those pieces: ${swapError}`, true);
+      return;
+    }
+  }
+  pushUndo();
+  if (target) target.square = fromSquare; // null → back to the tray
   item.square = square;
   state.selectedTray = -1;
+  if (animate && fromSquare) {
+    // Slide the click-move (and its swap partner) for visual continuity.
+    const slides = [{ from: fromSquare, to: square }];
+    if (target?.square === fromSquare) slides.push({ from: square, to: fromSquare });
+    await board.animateMoves(slides, currentMap(), 140);
+  }
   refreshSetup();
-  board.dropIn(square);
+  if (!fromSquare) board.dropIn(square);
   if (allPlaced() && startPositionError(state.puzzle, placements())) {
     board.highlight(square, 'bad');
   }
 }
 
-/** Drag a placed piece to another square (validated like a click-move). */
-function movePlaced(fromSquare, toSquare) {
+/** Move a placed piece by drag (validated and swapped like a click-move). */
+function movePlaced(fromSquare, toSquare, { animate = false } = {}) {
   if (state.phase !== 'setup' || fromSquare === toSquare) return;
   const idx = state.tray.findIndex((t) => t.square === fromSquare);
   if (idx < 0) return;
   state.selectedTray = idx;
-  placeSelected(toSquare);
+  placeSelected(toSquare, { animate });
   if (state.tray[idx].square === fromSquare) {
     // The move was refused: drop the selection the drag implied, but leave
     // the refusal message on screen (nothing was rendered as selected).
     state.selectedTray = -1;
+    refreshSetup();
+    board.setPosition(currentMap()); // snap the dragged piece home
   }
 }
 
-/** Drag a placed piece back to the tray to unplace it. */
+/** Return a placed piece to the tray (drag it there or off the board). */
 function returnToTray(fromSquare) {
   if (state.phase !== 'setup') return;
   const idx = state.tray.findIndex((t) => t.square === fromSquare);
   if (idx < 0) return;
+  pushUndo();
   state.tray[idx].square = null;
   state.selectedTray = -1;
   refreshSetup();
 }
 
+// ---- Pointer-based dragging (one code path for mouse AND touch) ----
+// HTML5 drag-and-drop never fires on touchscreens, so pieces use pointer
+// events instead: a floating clone follows the pointer, the hovered square
+// lights up, the source dims, and dropping resolves by position.
+const drag = { payload: null, sourceEl: null, moved: false, clone: null, hoverSq: null };
+
+function beginPieceDrag(e, payload, sourceEl) {
+  if (state.phase !== 'setup' || !e.isPrimary || e.button > 0) return;
+  drag.payload = payload;
+  drag.sourceEl = sourceEl;
+  drag.moved = false;
+  drag.startX = e.clientX;
+  drag.startY = e.clientY;
+  document.addEventListener('pointermove', onDragMove);
+  document.addEventListener('pointerup', onDragEnd);
+  document.addEventListener('pointercancel', cancelDrag);
+}
+
+function startDragVisuals(e) {
+  const size = els.board.getBoundingClientRect().width / 8;
+  const type = drag.payload.kind === 'tray'
+    ? state.tray[drag.payload.index]?.type
+    : state.tray.find((t) => t.square === drag.payload.from)?.type;
+  const clone = document.createElement('div');
+  clone.className = `drag-float ${pieceClass(state.puzzle.player, type)}`;
+  clone.style.width = `${size}px`;
+  clone.style.height = `${size}px`;
+  document.body.appendChild(clone);
+  drag.clone = clone;
+  drag.sourceEl.classList.add('drag-source');
+  positionDragClone(e);
+}
+
+function positionDragClone(e) {
+  drag.clone.style.transform = `translate(${e.clientX - drag.clone.offsetWidth / 2}px, ${e.clientY - drag.clone.offsetHeight / 2}px)`;
+}
+
+function onDragMove(e) {
+  if (!drag.payload) return;
+  if (!drag.moved) {
+    if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < 6) return;
+    drag.moved = true;
+    startDragVisuals(e);
+  }
+  positionDragClone(e);
+  const under = document.elementFromPoint(e.clientX, e.clientY);
+  const sq = under?.closest?.('.square')?.dataset.square ?? null;
+  if (sq !== drag.hoverSq) {
+    board.clearHighlights('drop-hover');
+    if (sq) board.highlight(sq, 'drop-hover');
+    drag.hoverSq = sq;
+  }
+  els.tray.classList.toggle('drop-hover',
+    drag.payload.kind === 'board' && Boolean(under && els.tray.contains(under)));
+}
+
+function onDragEnd(e) {
+  const { payload, moved } = drag;
+  const wasDrag = payload && moved;
+  if (wasDrag) {
+    // Swallow the click the browser fires after pointerup so it doesn't
+    // toggle a selection on whatever the piece was dropped on.
+    const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+    document.addEventListener('click', swallow, { capture: true, once: true });
+    setTimeout(() => document.removeEventListener('click', swallow, { capture: true }), 150);
+
+    const under = document.elementFromPoint(e.clientX, e.clientY);
+    const sq = under?.closest?.('.square')?.dataset.square ?? null;
+    const overTray = Boolean(under && (els.tray.contains(under) || els.trayLabel.contains(under)));
+    cleanupDrag();
+    if (payload.kind === 'tray') {
+      if (sq) {
+        state.selectedTray = payload.index;
+        placeSelected(sq, { animate: false });
+      } else {
+        refreshSetup(); // dropped nowhere: piece stays in the tray
+      }
+    } else if (sq) {
+      movePlaced(payload.from, sq, { animate: false });
+    } else if (overTray || !sq) {
+      returnToTray(payload.from); // tray or off-board = unplace
+    }
+  } else {
+    cleanupDrag(); // no movement: let the normal click do its thing
+  }
+}
+
+function cancelDrag() {
+  const hadVisuals = drag.moved;
+  cleanupDrag();
+  if (hadVisuals) refreshSetup();
+}
+
+function cleanupDrag() {
+  document.removeEventListener('pointermove', onDragMove);
+  document.removeEventListener('pointerup', onDragEnd);
+  document.removeEventListener('pointercancel', cancelDrag);
+  drag.clone?.remove();
+  drag.sourceEl?.classList.remove('drag-source');
+  board.clearHighlights('drop-hover');
+  els.tray.classList.remove('drop-hover');
+  drag.payload = null;
+  drag.sourceEl = null;
+  drag.clone = null;
+  drag.hoverSq = null;
+  drag.moved = false;
+}
+
+els.board.addEventListener('pointerdown', (e) => {
+  const pieceEl = e.target.closest?.('.piece.placed');
+  const square = pieceEl?.closest('.square')?.dataset.square;
+  if (pieceEl && square) beginPieceDrag(e, { kind: 'board', from: square }, pieceEl);
+});
+els.tray.addEventListener('pointerdown', (e) => {
+  const div = e.target.closest?.('.tray-piece');
+  if (div?.dataset.index != null) beginPieceDrag(e, { kind: 'tray', index: Number(div.dataset.index) }, div);
+});
+
 function resetPlacements() {
   state.runId++;
   state.phase = 'setup';
+  if (state.tray.some((t) => t.square)) pushUndo();
   for (const item of state.tray) item.square = null;
   state.selectedTray = -1;
   els.movelist.innerHTML = '';
@@ -890,9 +1053,22 @@ els.backBtn.addEventListener('click', () => state.pauseControls?.back());
 els.fwdBtn.addEventListener('click', () => state.pauseControls?.fwd());
 els.continueBtn.addEventListener('click', () => state.pauseControls?.cont());
 document.addEventListener('keydown', (e) => {
-  if (!state.pauseControls) return;
-  if (e.key === 'ArrowLeft') { e.preventDefault(); state.pauseControls.back(); }
-  if (e.key === 'ArrowRight') { e.preventDefault(); state.pauseControls.fwd(); }
+  if (state.pauseControls) {
+    if (e.key === 'ArrowLeft') { e.preventDefault(); state.pauseControls.back(); }
+    if (e.key === 'ArrowRight') { e.preventDefault(); state.pauseControls.fwd(); }
+    return;
+  }
+  if (e.key === 'Escape') {
+    if (drag.payload) { cancelDrag(); return; }
+    if (state.phase === 'setup' && state.selectedTray >= 0) {
+      state.selectedTray = -1;
+      refreshSetup();
+    }
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && state.phase === 'setup') {
+    e.preventDefault();
+    undoPlacement();
+  }
 });
 els.speedSlider.value = localStorage.getItem('chessauto-speed') || String(DEFAULT_ANIM_MS);
 els.speedValue.textContent = `${els.speedSlider.value} ms`;

@@ -91,6 +91,36 @@ main {
 .square.selected { outline: 3px solid #ffd24d; outline-offset: -3px; }
 .piece.placed:active { cursor: grabbing; }
 
+/* Pointer-drag visuals: the floating piece follows the pointer, the source
+   dims, the hovered square gets a dashed ring, and the tray glows when a
+   board piece can be dropped back into it. */
+.drag-float {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 60;
+  pointer-events: none;
+  background-position: center;
+  background-size: 84%;
+  background-repeat: no-repeat;
+  filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.55));
+}
+.drag-source { opacity: 0.35; }
+.square.drop-hover { outline: 3px dashed #ffd24d; outline-offset: -3px; }
+.tray.drop-hover { outline: 2px dashed #ffd24d; outline-offset: 2px; }
+
+/* Squares a selected pawn can never stand on (first/last rank) */
+.square.illegal {
+  background-image: repeating-linear-gradient(
+    45deg, rgba(20, 20, 20, 0.28), rgba(20, 20, 20, 0.28) 6px,
+    transparent 6px, transparent 12px);
+}
+
+/* Pointer dragging needs the browser to keep its hands off touch gestures
+   that start on a piece (scrolling would eat the drag). */
+.piece.placed,
+.tray-piece { touch-action: none; }
+
 /* Coordinate labels on the edge squares */
 .square::before {
   content: attr(data-rank-label);

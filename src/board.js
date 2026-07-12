@@ -1,5 +1,5 @@
-// Renders the chessboard and forwards user interaction (clicks and
-// drag-and-drop from the piece tray) back to the app.
+// Renders the chessboard and forwards square clicks back to the app
+// (pointer-based piece dragging lives in main.js and reads data-square).
 //
 // Pieces are drawn with the cburnett SVG set (see src/assets/pieces/) via
 // `pc-*` CSS classes shared with the tray.
@@ -70,8 +70,7 @@ export function traceOutlines(cells) {
 export class Board {
   /**
    * @param {HTMLElement} el
-   * @param {{ onSquareClick?: (sq: string) => void,
-   *           onDropPiece?: (trayIndex: number, sq: string) => void }} handlers
+   * @param {{ onSquareClick?: (sq: string) => void }} handlers
    */
   constructor(el, handlers = {}) {
     this.el = el;
@@ -89,20 +88,6 @@ export class Board {
       cell.className = 'square';
       cell.addEventListener('click', () => {
         if (cell.dataset.square) this.handlers.onSquareClick?.(cell.dataset.square);
-      });
-      cell.addEventListener('dragover', (e) => e.preventDefault());
-      cell.addEventListener('drop', (e) => {
-        e.preventDefault();
-        if (!cell.dataset.square) return;
-        const from = e.dataTransfer.getData('text/from-square');
-        if (from) {
-          this.handlers.onMovePiece?.(from, cell.dataset.square);
-          return;
-        }
-        const idx = e.dataTransfer.getData('text/tray-index');
-        if (idx !== '') {
-          this.handlers.onDropPiece?.(Number(idx), cell.dataset.square);
-        }
       });
       this.el.appendChild(cell);
     }
@@ -204,16 +189,6 @@ export class Board {
         cell.appendChild(span);
       }
       span.className = `piece ${pieceClass(piece.color, piece.type)}${piece.placed ? ' placed' : ''}`;
-      // Placed (user-owned) pieces can be dragged to another square or back
-      // to the tray. ondragstart (not addEventListener) so span reuse across
-      // setPosition calls never stacks handlers.
-      span.draggable = Boolean(piece.placed);
-      span.ondragstart = piece.placed
-        ? (e) => {
-          e.dataTransfer.setData('text/from-square', name);
-          e.dataTransfer.effectAllowed = 'move';
-        }
-        : null;
     }
   }
 
