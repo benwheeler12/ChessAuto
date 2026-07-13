@@ -1,27 +1,35 @@
-// Exact-spots puzzle generator: a coordinated cluster of the player's
-// pieces leaves the board, their ORIGINAL squares become the only allowed
-// spots, and the player must put each piece back on the right square —
-// exactly as many pieces in the tray as spots on the board, exactly one
-// arrangement wins. A thin composition over the generation libraries:
-// single process, one shared EnginePool, all in memory.
+// Exact-spots puzzle generator: a group of the player's pieces leaves the
+// board, their ORIGINAL squares become the only allowed spots, and the
+// player must put each piece back on the right square — exactly as many
+// pieces in the tray as spots on the board, exactly one arrangement wins.
+// A thin composition over the generation libraries: single process, one
+// shared EnginePool, all in memory.
 //
 // Selection favors sharp positions where the player is EVEN OR BEHIND in
 // material but winning by engine eval — the win lives in the coordination,
-// so scrambling the pieces ruins it. Clusters come from
-// detectors.defenseClusters (mutually defending / adjacent pieces).
+// so scrambling the pieces ruins it. Groups come from
+// detectors.activeClusters: the removed pieces are the ones doing real
+// work (attacking, defending contested pieces, covering king zones), so
+// the solver has to read the position's threats to restore them.
 //
 // Usage: node scripts/generate-spots.mjs --label "My batch label"
 //   [--pgn data/lichess-games.pgn] [--features <cache.jsonl>]
-//   [--top 400] [--offset 0] [--pool 3] [--out-dir src/puzzles]
+//   [--pieces 3] [--scatter] [--top 400] [--offset 0] [--pool 3]
+//   [--out-dir src/puzzles]
+//
+// --pieces N   remove N pieces / N spots (default 3; 4 gives up to 24
+//              arrangements instead of 6 — ~4× the deep-eval spend)
+// --scatter    drop the connectivity requirement: spots may sit on
+//              disparate parts of the board (distant groups rank higher)
 //
 // COST (pool of 3): failed origin gates cost 1 shallow eval (~80ms); a
 // candidate that reaches assignment testing costs ≤6 deep evals (700ms)
-// ≈ 2s — an order of magnitude cheaper per candidate than sector builds.
+// ≈ 2s at --pieces 3, ≤24 ≈ 8s at --pieces 4.
 
 import { EnginePool, mapConcurrent } from './lib/engine.mjs';
 import { featureRows, stageTimer } from './lib/pipeline.mjs';
 import { readCorpus } from './lib/corpus.mjs';
-import { defenseClusters, enumerateCombos } from './lib/detectors.mjs';
+import { activeClusters, enumerateCombos } from './lib/detectors.mjs';
 import { evaluatePlayer, scanPlacements } from './lib/qualify.mjs';
 import { readBatches, writeBatch } from './lib/batches.mjs';
 import { fenToMap, buildFen } from '../src/fen.js';
@@ -30,11 +38,9 @@ import { isLegalStart } from '../src/puzzle-contract.js';
 const SHALLOW_MS = 80;
 const DEEP_MS = 700;
 const ORIGIN_WIN_CP = 300; // the source position must already be winning…
-const ORIGIN_MAX_CP = 1200; // …but not so crushing that anything wins
 const MAX_MATERIAL_EDGE = 0; // player even or BEHIND: the win is coordination
 const WIN_CP = 300; // the unique correct arrangement must clearly win
 const MAX_OTHER_CP = 50; // every wrong arrangement must be at best equal
-const CLUSTER_SIZE = 3; // pieces per puzzle (6 arrangements when distinct)
 const PIECE_NAMES = { q: 'queen', r: 'rook', b: 'bishop', n: 'knight', p: 'pawn', k: 'king' };
 
 // ---- Options ----
@@ -48,6 +54,12 @@ const TOP_N = Number(opt('top', 400));
 const OFFSET = Number(opt('offset', 0));
 const POOL_SIZE = Number(opt('pool', 3));
 const OUT_DIR = opt('out-dir', 'src/puzzles');
+const CLUSTER_SIZE = Number(opt('pieces', 3));
+const SCATTER = process.argv.includes('--scatter');
+// …but not so crushing that anything wins. More pieces to replace means
+// more arrangements that keep a fat margin winning, so bigger groups need
+// origins that are only just winning to keep the solution unique.
+const ORIGIN_MAX_CP = Number(opt('origin-max', CLUSTER_SIZE >= 4 ? 600 : 1200));
 const LABEL = opt('label', null);
 if (!LABEL) {
   console.error('A --label for the new batch is required (shown in the collection dropdown).');
@@ -97,8 +109,8 @@ async function qualify({ row, meta, player }) {
   }
 
   const map = fenToMap(row.fen);
-  const clusters = defenseClusters(map, row.fen, player, { size: CLUSTER_SIZE });
-  if (!clusters.length) return { log: `skip g${row.game} ply${row.ply}: no ${CLUSTER_SIZE}-piece cluster` };
+  const clusters = activeClusters(map, row.fen, player, { size: CLUSTER_SIZE, scatter: SCATTER });
+  if (!clusters.length) return { log: `skip g${row.game} ply${row.ply}: no ${CLUSTER_SIZE}-piece active group` };
 
   const reasons = [];
   for (const cluster of clusters) {
@@ -117,6 +129,10 @@ async function qualify({ row, meta, player }) {
     }
     if (assignments.length < 3) {
       reasons.push(`${spots.join(',')}: only ${assignments.length} legal arrangements`);
+      continue;
+    }
+    if (assignments.length > 24) {
+      reasons.push(`${spots.join(',')}: ${assignments.length} arrangements — too costly to verify`);
       continue;
     }
 
@@ -140,7 +156,8 @@ async function qualify({ row, meta, player }) {
         name: `${meta.white}–${meta.black} (Lichess)`,
         description:
           `From a Lichess game (${meta.site}), around move ${row.moveNo}. ` +
-          `Your ${pieceList} have left their posts — put each piece back on the right spot. ` +
+          `Your most active pieces — ${pieceList} — have left their posts` +
+          `${SCATTER ? ' across the board' : ''}. Put each piece back on the right spot. ` +
           `Exactly one arrangement wins, and the opponent moves first.`,
         fen: buildFen(baseMap, player),
         player,
@@ -149,7 +166,8 @@ async function qualify({ row, meta, player }) {
         placement: { allowed: spots },
         solutions: [winner.sig],
         meta: {
-          foundBy: ['defense-cluster'],
+          foundBy: [SCATTER ? 'active-scatter' : 'active-cluster'],
+          activity: cluster.activity,
           winCp: winner.cp,
           arrangements: scans.length,
           source: {
@@ -176,14 +194,24 @@ const results = await mapConcurrent(jobs, POOL_SIZE, async (job) => {
 qualifyLog(`${results.filter((r) => r.puzzle).length} qualified; engine ${JSON.stringify(pool.stats())}`);
 await pool.close();
 
-const fresh = results.filter((r) => r.puzzle).map((r) => r.puzzle);
+// One puzzle per source game keeps a batch varied.
+const seenGames = new Set();
+const fresh = [];
+for (const r of results) {
+  if (!r.puzzle) continue;
+  const site = r.puzzle.meta.source.site;
+  if (seenGames.has(site)) continue;
+  seenGames.add(site);
+  fresh.push(r.puzzle);
+}
 if (!fresh.length) {
   console.error('\nNo positions qualified — nothing written.');
   process.exit(1);
 }
 const { path: outFile, batchId, count } = writeBatch({
   label: LABEL,
-  generator: `scripts/generate-spots.mjs (defense clusters, unique arrangement, top ${TOP_N} offset ${OFFSET})`,
+  generator: `scripts/generate-spots.mjs (active pieces${SCATTER ? ', scattered' : ''}, ` +
+    `${CLUSTER_SIZE} spots, unique arrangement, top ${TOP_N} offset ${OFFSET})`,
   puzzles: fresh,
   dir: OUT_DIR,
 });

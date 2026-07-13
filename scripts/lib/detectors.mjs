@@ -142,6 +142,146 @@ export function enumerateCombos(types, empties, cap = 400) {
   return out;
 }
 
+const VALUES = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+const chebyshev = (a, b) =>
+  Math.max(Math.abs(a.charCodeAt(0) - b.charCodeAt(0)), Math.abs(Number(a[1]) - Number(b[1])));
+
+/** The up-to-9 squares within king distance 1 of `sq` (including it). @cost µs */
+function kingZone(sq) {
+  if (!sq) return [];
+  const f = sq.charCodeAt(0) - 97;
+  const r = Number(sq[1]);
+  const out = [];
+  for (let df = -1; df <= 1; df++) {
+    for (let dr = -1; dr <= 1; dr++) {
+      if (f + df < 0 || f + df > 7 || r + dr < 1 || r + dr > 8) continue;
+      out.push(FILES[f + df] + (r + dr));
+    }
+  }
+  return out;
+}
+
+/**
+ * Groups of the player's most ACTIVE pieces — the ones doing real work in
+ * the position: attacking enemy pieces (value-weighted), covering the enemy
+ * king's zone, defending contested friendly pieces, shielding the own
+ * king's zone, or standing in enemy contact. Removing these pieces takes
+ * the position's tension out with them, so putting them back demands
+ * reading the threats rather than pattern-matching "sensible" squares.
+ *
+ * By default groups must be connected (defense relation or adjacency), like
+ * defenseClusters. With `scatter: true` the connectivity requirement is
+ * dropped and groups whose squares are FAR APART rank higher, yielding
+ * puzzles whose spots span disparate parts of the board.
+ *
+ * @returns {{squares: string[], types: string[], score: number,
+ *            activity: number}[]} top groups, best first
+ * @cost ~2ms — a few attackers() calls per piece plus subset enumeration
+ */
+export function activeClusters(map, fen, player, { size = 3, top = 3, scatter = false } = {}) {
+  const game = new Chess(fen);
+  const opponent = player === 'w' ? 'b' : 'w';
+  const mine = Object.keys(map).filter((sq) => map[sq].color === player && map[sq].type !== 'k');
+  if (mine.length < size) return [];
+  const myKing = Object.keys(map).find((sq) => map[sq].type === 'k' && map[sq].color === player);
+  const theirKing = Object.keys(map).find((sq) => map[sq].type === 'k' && map[sq].color === opponent);
+  const own = new Set(mine);
+
+  // Per-piece activity: what does this piece attack, defend, or cover?
+  const attacks = new Map(mine.map((sq) => [sq, 0])); // value of enemy pieces attacked
+  const defends = new Map(mine.map((sq) => [sq, 0])); // value of CONTESTED friends defended
+  const defense = new Map(mine.map((sq) => [sq, new Set()])); // guard edges (for connectivity)
+  for (const [sq, piece] of Object.entries(map)) {
+    if (piece.color === opponent) {
+      if (piece.type === 'k') continue; // king pressure is counted via its zone
+      for (const a of game.attackers(sq, player)) {
+        if (attacks.has(a)) attacks.set(a, attacks.get(a) + 1 + VALUES[piece.type]);
+      }
+    } else {
+      const guards = game.attackers(sq, player).filter((g) => own.has(g));
+      for (const g of guards) {
+        if (piece.type !== 'k' && defense.has(sq)) {
+          defense.get(sq).add(g);
+          defense.get(g).add(sq);
+        }
+      }
+      if (game.attackers(sq, opponent).length) {
+        for (const g of guards) defends.set(g, defends.get(g) + 1 + VALUES[piece.type]);
+      }
+    }
+  }
+  const zoneCover = new Map(mine.map((sq) => [sq, 0])); // enemy-king-zone squares hit
+  const ownCover = new Map(mine.map((sq) => [sq, 0])); // own-king-zone squares shielded
+  for (const zsq of kingZone(theirKing)) {
+    for (const a of game.attackers(zsq, player)) {
+      if (zoneCover.has(a)) zoneCover.set(a, zoneCover.get(a) + 1);
+    }
+  }
+  for (const zsq of kingZone(myKing)) {
+    for (const a of game.attackers(zsq, player)) {
+      if (ownCover.has(a)) ownCover.set(a, ownCover.get(a) + 1);
+    }
+  }
+  const activity = new Map(mine.map((sq) => [sq,
+    attacks.get(sq) + defends.get(sq) + zoneCover.get(sq) * 2 + ownCover.get(sq) +
+    (game.isAttacked(sq, opponent) ? 2 : 0),
+  ]));
+
+  // Only genuinely active pieces are removal candidates; cap the subset
+  // enumeration at the 10 most active.
+  const candidates = mine
+    .filter((sq) => activity.get(sq) > 0)
+    .sort((a, b) => activity.get(b) - activity.get(a))
+    .slice(0, 10);
+  if (candidates.length < size) return [];
+
+  const adjacentOrGuarding = (a, b) => defense.get(a).has(b) || chebyshev(a, b) <= 1;
+  const connected = (subset) => {
+    const seen = new Set([subset[0]]);
+    const stack = [subset[0]];
+    while (stack.length) {
+      const cur = stack.pop();
+      for (const nb of subset) {
+        if (!seen.has(nb) && adjacentOrGuarding(cur, nb)) {
+          seen.add(nb);
+          stack.push(nb);
+        }
+      }
+    }
+    return seen.size === subset.length;
+  };
+
+  const groups = [];
+  const pick = (start, chosen) => {
+    if (chosen.length === size) {
+      if (!scatter && !connected(chosen)) return;
+      let sum = 0;
+      let spread = 0;
+      for (let i = 0; i < chosen.length; i++) {
+        sum += activity.get(chosen[i]);
+        for (let j = i + 1; j < chosen.length; j++) spread += chebyshev(chosen[i], chosen[j]);
+      }
+      const pairs = (size * (size - 1)) / 2;
+      const types = chosen.map((sq) => map[sq].type);
+      const distinct = new Set(types).size;
+      groups.push({
+        squares: [...chosen],
+        types,
+        activity: sum,
+        score: sum + distinct * 2 + (scatter ? spread / pairs : 0),
+      });
+      return;
+    }
+    for (let i = start; i < candidates.length; i++) {
+      chosen.push(candidates[i]);
+      pick(i + 1, chosen);
+      chosen.pop();
+    }
+  };
+  pick(0, []);
+  return groups.sort((a, b) => b.score - a.score).slice(0, top);
+}
+
 /**
  * Clusters of coordinated pieces: groups of `size` non-king pieces of one
  * color connected by defense relations (one piece guards another's square)
