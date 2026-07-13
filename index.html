@@ -59,6 +59,12 @@
         <p id="puzzle-desc" class="desc"></p>
 
         <div class="review-box">
+          <div id="review-auth" class="review-auth" hidden>
+            <span id="review-auth-note">Sign in to leave reviews:</span>
+            <div id="gsi-button"></div>
+            <span id="review-auth-user" hidden></span>
+            <button id="review-signout" hidden>Sign out</button>
+          </div>
           <textarea id="review-text" rows="2" maxlength="1000"
             placeholder="Review this puzzle — what worked, what didn’t? (sent with your 👍/👎)"></textarea>
           <button id="review-send" class="secondary">Send review</button>

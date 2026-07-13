@@ -179,6 +179,42 @@ The live deployment is **https://chess-auto.vercel.app** — the daily job
 fetches `GET https://chess-auto.vercel.app/api/reviews?since=<cursor>`
 (the `REVIEWS_API_BASE_URL` env var, when set, overrides that host).
 
+### Reviewer identity (Google sign-in) and vetting
+
+Reviews are attributed to a verified Google account, and the daily loop
+only consumes feedback from an allowlist of vetted reviewers:
+
+- The app shows a **Sign in with Google** button above the review box;
+  the resulting ID token rides along with every review POST.
+- `api/review.js` verifies the token server-side (audience + expiry +
+  verified email, via Google's tokeninfo endpoint) and stores
+  `reviewer: {email, name, sub}` on the review. Unauthenticated POSTs
+  are rejected with 401.
+- `api/reviews.js` returns only reviews whose reviewer email is in
+  `REVIEWS_ALLOWED_EMAILS` (comma-separated, case-insensitive); add
+  `?all=1` to inspect everything, with a `vetted` flag per review. The
+  cursor advances past unvetted reviews too, so they can't wedge the
+  loop.
+
+One-time setup:
+
+1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials):
+   create a project → configure the OAuth consent screen (External,
+   publish it) → **Create credentials → OAuth client ID → Web
+   application**, with authorized JavaScript origins
+   `https://chess-auto.vercel.app` (plus `http://localhost:5173` and
+   `http://localhost:4173` for local dev). No client secret is needed —
+   the ID-token flow is public-client.
+2. In the Vercel project, add env vars **`VITE_GOOGLE_CLIENT_ID`** (the
+   client ID from step 1 — one var serves both the build-time frontend
+   and the serverless verifier) and **`REVIEWS_ALLOWED_EMAILS`** (e.g.
+   your own Gmail address), then redeploy.
+
+Until `VITE_GOOGLE_CLIENT_ID` is set, the review box stays in the
+legacy anonymous mode, and an empty `REVIEWS_ALLOWED_EMAILS` treats
+every review as vetted — so the feature degrades cleanly while it's
+being configured.
+
 One-time setup in the Vercel project: create a **Blob** store under
 Storage and connect it — newer stores add `BLOB_STORE_ID` and rely on
 the `VERCEL_OIDC_TOKEN` Vercel injects into functions at runtime (older

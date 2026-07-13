@@ -21,11 +21,48 @@ async function putAdaptive(key, body, contentType) {
 
 const MAX_TEXT = 1000;
 
+/** Verify a Google ID token against our OAuth client id and return the
+ * reviewer identity, or null when the token is missing/invalid/expired.
+ * Uses Google's tokeninfo endpoint — one HTTPS round-trip, fine at review
+ * volume, and Google does the signature check. */
+async function verifyGoogleIdToken(idToken, clientId) {
+  if (typeof idToken !== 'string' || !idToken) return null;
+  try {
+    const res = await fetch(
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`,
+    );
+    if (!res.ok) return null;
+    const claims = await res.json();
+    if (claims.aud !== clientId) return null;
+    if (Number(claims.exp) * 1000 < Date.now()) return null;
+    if (String(claims.email_verified) !== 'true' || !claims.email) return null;
+    return {
+      email: claims.email.toLowerCase(),
+      name: claims.name ?? null,
+      sub: claims.sub ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'POST only' });
   }
-  const { puzzleId, batchId, rating = null, text = '', clientId = null } = req.body ?? {};
+  const { puzzleId, batchId, rating = null, text = '', clientId = null, idToken = null } =
+    req.body ?? {};
+
+  // With an OAuth client configured, every review must carry a verified
+  // Google identity. Without one (not yet set up), reviews stay anonymous.
+  const googleClientId = process.env.VITE_GOOGLE_CLIENT_ID;
+  let reviewer = null;
+  if (googleClientId) {
+    reviewer = await verifyGoogleIdToken(idToken, googleClientId);
+    if (!reviewer) {
+      return res.status(401).json({ error: 'Google sign-in required' });
+    }
+  }
   if (typeof puzzleId !== 'string' || !/^b\d{3}-\d+$/.test(puzzleId)) {
     return res.status(400).json({ error: 'bad puzzleId' });
   }
@@ -45,6 +82,7 @@ export default async function handler(req, res) {
     rating,
     text: text.trim(),
     clientId: typeof clientId === 'string' ? clientId.slice(0, 40) : null,
+    reviewer,
     createdAt: new Date().toISOString(),
   };
   const key = `reviews/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
