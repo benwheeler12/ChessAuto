@@ -137,13 +137,18 @@ redirects output for dry runs, `--pool N` sizes the engine pool, and
   placements on the whole board win. Positions already used by any existing
   batch are skipped automatically.
 - `npm run generate:spots -- --label "…"` (`scripts/generate-spots.mjs`)
-  — **exact spots**: a coordinated cluster of the player's pieces
-  (mutually defending / adjacent, via `detectors.defenseClusters`) leaves
-  the board and its original squares become the only allowed spots. As
-  many pieces in the tray as spots on the board; exactly ONE arrangement
-  wins, and every wrong arrangement is verified to be at best equal.
-  Selection favors sharp positions where the player is even or behind in
-  material, so the win lives in the coordination being restored.
+  — **exact spots**: a group of the player's most ACTIVE pieces (attacking
+  enemy pieces, covering the enemy king's zone, defending contested
+  friends — via `detectors.activeClusters`) leaves the board and its
+  original squares become the only allowed spots. As many pieces in the
+  tray as spots on the board; exactly ONE arrangement wins, and every
+  wrong arrangement is verified to be at best equal. Selection favors
+  sharp positions where the player is even or behind in material, so the
+  win lives in the coordination being restored. `--pieces 4` removes four
+  pieces (up to 24 arrangements — the origin window automatically narrows
+  to just-winning positions to keep the solution unique); `--scatter`
+  drops the connectivity requirement so the spots can sit on disparate
+  parts of the board, with distant groups ranked higher.
 - `npm run generate:sectors -- --label "…"` (`scripts/generate-sectors.mjs`)
   — 3×3 **sector builds**: from positions where the player is winning but
   the opponent moves first, it finds a tactically hot 3×3 zone (pieces of
@@ -169,6 +174,10 @@ secret-gated `api/reviews.js`, digests the feedback into a proposed
 pipeline change, and waits for approval before implementing it and
 shipping a new batch. `data/review-cursor.json` records the last review
 the loop has processed.
+
+The live deployment is **https://chess-auto.vercel.app** — the daily job
+fetches `GET https://chess-auto.vercel.app/api/reviews?since=<cursor>`
+(the `REVIEWS_API_BASE_URL` env var, when set, overrides that host).
 
 One-time setup in the Vercel project: create a **Blob** store under
 Storage and connect it — newer stores add `BLOB_STORE_ID` and rely on
