@@ -82,6 +82,10 @@ const MAX_WINNERS = Number(opt('max-winners', 1));
 // = 10 signatures, often fewer legal) — a "5-spot" puzzle with 4
 // arrangements is trivial. Raise for bigger groups.
 const MIN_ARRANGEMENTS = Number(opt('min-arrangements', 3));
+// Candidates per source game during qualification (write-time dedupe still
+// ships at most one puzzle per game). The eligible pool is roughly
+// games × per-game, so raise this to sweep deeper into a small corpus.
+const PER_GAME = Number(opt('per-game', 2));
 const LABEL = opt('label', null);
 if (!LABEL) {
   console.error('A --label for the new batch is required (shown in the collection dropdown).');
@@ -110,7 +114,7 @@ for (const row of [...rows].sort((a, b) => sharpness(b) - sharpness(a))) {
   const edge = playerIsWhite ? row.materialW - row.materialB : row.materialB - row.materialW;
   if (edge > MAX_MATERIAL_EDGE) continue;
   const n = perGame.get(row.game) ?? 0;
-  if (n >= 2) continue;
+  if (n >= PER_GAME) continue;
   const meta = games[row.game];
   const player = playerIsWhite ? 'w' : 'b';
   if (covered.has(`${meta.site}|${row.moveNo}|${player}`)) continue;
