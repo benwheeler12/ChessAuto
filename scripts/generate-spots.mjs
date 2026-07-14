@@ -73,6 +73,11 @@ const NON_OBVIOUS = process.argv.includes('--non-obvious');
 // more arrangements that keep a fat margin winning, so bigger groups need
 // origins that are only just winning to keep the solution unique.
 const ORIGIN_MAX_CP = Number(opt('origin-max', CLUSTER_SIZE >= 4 ? 600 : 1200));
+// With 5 spots (up to 120 arrangements) a UNIQUE winner is nearly
+// unsatisfiable — positions winning by 300cp can usually be rebuilt a few
+// ways. Allowing a small solution set keeps the category viable: finding
+// one of ≤3 winners among 120 arrangements is still hard.
+const MAX_WINNERS = Number(opt('max-winners', 1));
 const LABEL = opt('label', null);
 if (!LABEL) {
   console.error('A --label for the new batch is required (shown in the collection dropdown).');
@@ -172,8 +177,8 @@ async function qualify({ row, meta, player }) {
       scans = await scanPlacements(pool, survivors.map(({ cp, ...a }) => a), player, { movetime: DEEP_MS });
     }
     const winners = scans.filter((s) => s.cp >= WIN_CP);
-    if (winners.length !== 1) {
-      reasons.push(`${spots.join(',')}: ${winners.length} winning arrangements`);
+    if (winners.length < 1 || winners.length > MAX_WINNERS) {
+      reasons.push(`${spots.join(',')}: ${winners.length} winning arrangements (want 1..${MAX_WINNERS})`);
       continue;
     }
     const nearMisses = scans.filter((s) => s.cp < WIN_CP && s.cp > MAX_OTHER_CP);
@@ -183,23 +188,26 @@ async function qualify({ row, meta, player }) {
     }
 
     // Obviousness gate: score EVERY legal arrangement by pattern-
-    // recognition plausibility; if the winner is (or ties for) the most
-    // plausible-looking, instinct solves the puzzle — reject it.
+    // recognition plausibility; if any winning arrangement is (or ties
+    // for) the most plausible-looking, instinct solves the puzzle —
+    // reject it.
     let hidden = null;
     if (NON_OBVIOUS) {
       const scored = assignments.map((a) => ({
         sig: a.sig,
         plausibility: arrangementPlausibility(a.fen, a.placements, player),
       }));
-      const { rank, score, top, hidden: isHidden } = plausibilityRank(scored, winners[0].sig);
-      if (!isHidden) {
-        reasons.push(`${spots.join(',')}: winner looks as plausible as anything (score ${score} vs top ${top})`);
+      const ranks = winners.map((w) => plausibilityRank(scored, w.sig));
+      const exposed = ranks.find((r) => !r.hidden);
+      if (exposed) {
+        reasons.push(`${spots.join(',')}: a winner looks as plausible as anything (score ${exposed.score} vs top ${exposed.top})`);
         continue;
       }
-      hidden = { plausibilityRank: rank, plausibility: score, topPlausibility: top };
+      const worst = ranks.reduce((a, b) => (b.score > a.score ? b : a));
+      hidden = { plausibilityRank: worst.rank, plausibility: worst.score, topPlausibility: worst.top };
     }
 
-    const winner = winners[0];
+    const winner = winners.reduce((a, b) => (b.cp > a.cp ? b : a));
     const pieceList = cluster.types.map((t) => PIECE_NAMES[t]).join(' + ');
     return {
       puzzle: {
@@ -208,13 +216,16 @@ async function qualify({ row, meta, player }) {
           `From a Lichess game (${meta.site}), around move ${row.moveNo}. ` +
           `Your most active pieces — ${pieceList} — have left their posts` +
           `${SCATTER ? ' across the board' : ''}. Put each piece back on the right spot. ` +
-          `Exactly one arrangement wins, and the opponent moves first.`,
+          `${winners.length === 1
+            ? 'Exactly one arrangement wins'
+            : `Only ${winners.length} of the ${assignments.length} arrangements win`}, ` +
+          'and the opponent moves first.',
         fen: buildFen(baseMap, player),
         player,
         place: cluster.types,
         firstMove: 'opponent',
         placement: { allowed: spots },
-        solutions: [winner.sig],
+        solutions: winners.map((w) => w.sig).sort(),
         meta: {
           foundBy: [SCATTER ? 'active-scatter' : 'active-cluster', ...(NON_OBVIOUS ? ['non-obvious'] : [])],
           ...(hidden ?? {}),
@@ -229,7 +240,8 @@ async function qualify({ row, meta, player }) {
         },
       },
       log: `✓ g${row.game} ply${row.ply} spots [${spots.join(' ')}] pieces [${cluster.types.join(' ').toUpperCase()}] — ` +
-        `unique winner ${winner.sig} (+${(winner.cp / 100).toFixed(1)}) of ${assignments.length} arrangements`,
+        `${winners.length === 1 ? `unique winner ${winner.sig}` : `${winners.length} winners (best ${winner.sig})`} ` +
+        `(+${(winner.cp / 100).toFixed(1)}) of ${assignments.length} arrangements`,
     };
   }
   return { log: `✗ g${row.game} ply${row.ply}: ${reasons.join('; ')}` };
