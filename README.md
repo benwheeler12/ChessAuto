@@ -146,9 +146,18 @@ redirects output for dry runs, `--pool N` sizes the engine pool, and
   sharp positions where the player is even or behind in material, so the
   win lives in the coordination being restored. `--pieces 4` removes four
   pieces (up to 24 arrangements — the origin window automatically narrows
-  to just-winning positions to keep the solution unique); `--scatter`
-  drops the connectivity requirement so the spots can sit on disparate
-  parts of the board, with distant groups ranked higher.
+  to just-winning positions to keep the solution unique); `--pieces 5`
+  (up to 120 arrangements) adds a shallow prescreen and usually needs
+  `--max-winners 3` — a unique winner is nearly unsatisfiable there, so
+  a few winners are accepted at a ≥6:1 arrangements-per-winner ratio,
+  with `--min-arrangements` flooring duplicate-collapsed spaces;
+  `--scatter` drops the connectivity requirement so the spots can sit on
+  disparate parts of the board, with distant groups ranked higher;
+  `--non-obvious` rejects puzzles whose winning arrangement is not
+  STRICTLY less plausible-looking than the best-looking loser, per the
+  pattern-recognition scorer in `scripts/lib/plausibility.mjs`
+  (calibrated against b009 playtest verdicts); `--per-game` deepens the
+  candidate pool for small corpora.
 - `npm run generate:sectors -- --label "…"` (`scripts/generate-sectors.mjs`)
   — 3×3 **sector builds**: from positions where the player is winning but
   the opponent moves first, it finds a tactically hot 3×3 zone (pieces of
