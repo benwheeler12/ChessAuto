@@ -5,11 +5,14 @@
 // caller persists the last processed key as its cursor — see
 // data/review-cursor.json in the repo.
 //
-// Vetting: when REVIEWS_ALLOWED_EMAILS is set (comma-separated emails),
-// only reviews from those Google-verified reviewers are returned; pass
-// ?all=1 to see everything (each review carries `vetted` either way). The
-// cursor always advances past every scanned review, vetted or not, so
-// unvetted reviews never wedge the loop.
+// SECURITY: the consumer of this endpoint is an autonomous agent, so the
+// response must never contain text from unvetted authors — review text is
+// a prompt-injection surface. Only reviews whose Google-verified reviewer
+// email is in REVIEWS_ALLOWED_EMAILS (comma-separated) are returned; there
+// is deliberately NO parameter that widens this. An empty allowlist fails
+// CLOSED (zero reviews). Audit unvetted submissions in the Vercel Blob
+// dashboard, not through this API. The cursor still advances past every
+// scanned review, vetted or not, so unvetted reviews can't wedge the loop.
 
 import { list, get } from '@vercel/blob';
 
@@ -37,10 +40,9 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'unauthorized' });
   }
   const since = typeof req.query.since === 'string' ? req.query.since : '';
-  const includeAll = req.query.all === '1';
 
   try {
-    return res.status(200).json(await collect(since, includeAll));
+    return res.status(200).json(await collect(since));
   } catch (err) {
     return res.status(500).json({ error: `blob list failed: ${err.message}` });
   }
@@ -52,9 +54,18 @@ const allowlist = () =>
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
 
-async function collect(since, includeAll) {
+async function collect(since) {
   const allowed = allowlist();
-  const vetted = (r) => !allowed.length || allowed.includes(r.reviewer?.email ?? '');
+  if (!allowed.length) {
+    // Fail closed: without an allowlist nothing is trusted, nothing is
+    // returned — a deleted env var must not reopen the injection surface.
+    return {
+      reviews: [],
+      cursor: since || null,
+      note: 'REVIEWS_ALLOWED_EMAILS is empty — returning no reviews (fail-closed)',
+    };
+  }
+
   const reviews = [];
   let newest = since || null;
   let cursor;
@@ -66,9 +77,8 @@ async function collect(since, includeAll) {
       if (!newest || key > newest) newest = key;
       const data = await readBlobJson(blob);
       if (!data) continue;
-      const isVetted = vetted(data);
-      if (!isVetted && !includeAll) continue;
-      reviews.push({ ...data, key, vetted: isVetted });
+      if (!allowed.includes(data.reviewer?.email ?? '')) continue;
+      reviews.push({ ...data, key });
     }
     cursor = page.cursor;
   } while (cursor);
