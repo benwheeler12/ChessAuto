@@ -213,17 +213,17 @@ main {
   overflow: visible;
 }
 .board .zone-layer .zone {
-  fill: rgba(255, 152, 32, 0.10);
-  stroke: #ff9820;
-  stroke-width: 3.5px;
+  fill: rgba(214, 98, 0, 0.30);
+  stroke: #d96800;
+  stroke-width: 4px;
   vector-effect: non-scaling-stroke;
   stroke-linejoin: round;
-  filter: drop-shadow(0 0 7px rgba(255, 152, 32, 0.75));
+  filter: drop-shadow(0 0 8px rgba(214, 98, 0, 0.9));
   animation: zone-breathe 2.6s ease-in-out infinite;
 }
 @keyframes zone-breathe {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.72; }
+  50% { opacity: 0.85; }
 }
 
 /* Blocked squares in prototype 2 (too-obvious winning placements) */
