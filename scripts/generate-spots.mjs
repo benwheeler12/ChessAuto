@@ -78,6 +78,10 @@ const ORIGIN_MAX_CP = Number(opt('origin-max', CLUSTER_SIZE >= 4 ? 600 : 1200));
 // ways. Allowing a small solution set keeps the category viable: finding
 // one of ≤3 winners among 120 arrangements is still hard.
 const MAX_WINNERS = Number(opt('max-winners', 1));
+// Duplicate piece types collapse the arrangement space (2R+3P on 5 spots
+// = 10 signatures, often fewer legal) — a "5-spot" puzzle with 4
+// arrangements is trivial. Raise for bigger groups.
+const MIN_ARRANGEMENTS = Number(opt('min-arrangements', 3));
 const LABEL = opt('label', null);
 if (!LABEL) {
   console.error('A --label for the new batch is required (shown in the collection dropdown).');
@@ -145,7 +149,7 @@ async function qualify({ row, meta, player }) {
       if (!isLegalStart(fen)) continue;
       assignments.push({ sig, fen, placements });
     }
-    if (assignments.length < 3) {
+    if (assignments.length < MIN_ARRANGEMENTS) {
       reasons.push(`${spots.join(',')}: only ${assignments.length} legal arrangements`);
       continue;
     }
@@ -179,6 +183,12 @@ async function qualify({ row, meta, player }) {
     const winners = scans.filter((s) => s.cp >= WIN_CP);
     if (winners.length < 1 || winners.length > MAX_WINNERS) {
       reasons.push(`${spots.join(',')}: ${winners.length} winning arrangements (want 1..${MAX_WINNERS})`);
+      continue;
+    }
+    // Multiple winners are only interesting when they're needles in a
+    // haystack — at least 6 arrangements per winning one.
+    if (winners.length > 1 && winners.length * 6 > assignments.length) {
+      reasons.push(`${spots.join(',')}: ${winners.length}/${assignments.length} winners — too forgiving`);
       continue;
     }
     const nearMisses = scans.filter((s) => s.cp < WIN_CP && s.cp > MAX_OTHER_CP);
