@@ -190,11 +190,15 @@ only consumes feedback from an allowlist of vetted reviewers:
   verified email, via Google's tokeninfo endpoint) and stores
   `reviewer: {email, name, sub}` on the review. Unauthenticated POSTs
   are rejected with 401.
-- `api/reviews.js` returns only reviews whose reviewer email is in
-  `REVIEWS_ALLOWED_EMAILS` (comma-separated, case-insensitive); add
-  `?all=1` to inspect everything, with a `vetted` flag per review. The
-  cursor advances past unvetted reviews too, so they can't wedge the
-  loop.
+- `api/reviews.js` returns ONLY reviews whose Google-verified reviewer
+  email is in `REVIEWS_ALLOWED_EMAILS` (comma-separated,
+  case-insensitive). Unvetted review text never leaves the store
+  through this API — its consumer is an autonomous agent, so unvetted
+  text is a prompt-injection surface, and there is deliberately no
+  parameter that widens the response. An empty allowlist fails CLOSED
+  (zero reviews). To audit unvetted submissions, browse the raw blobs
+  in the Vercel Blob dashboard. The cursor advances past unvetted
+  reviews too, so they can't wedge the loop.
 
 One-time setup:
 
@@ -211,9 +215,10 @@ One-time setup:
    your own Gmail address), then redeploy.
 
 Until `VITE_GOOGLE_CLIENT_ID` is set, the review box stays in the
-legacy anonymous mode, and an empty `REVIEWS_ALLOWED_EMAILS` treats
-every review as vetted — so the feature degrades cleanly while it's
-being configured.
+legacy anonymous mode (submissions accepted without identity). Reading
+is stricter: with `REVIEWS_ALLOWED_EMAILS` empty, `api/reviews.js`
+returns nothing at all, so the daily loop consumes no feedback until
+the allowlist exists.
 
 One-time setup in the Vercel project: create a **Blob** store under
 Storage and connect it — newer stores add `BLOB_STORE_ID` and rely on
