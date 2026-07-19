@@ -74,10 +74,15 @@ isolation headers are required.
 
 - **Rules & legality**: [chess.js](https://github.com/jhlywa/chess.js) validates
   constructed positions and executes engine moves.
-- **Engines**: two [Stockfish 18](https://stockfishchess.org/) WASM workers
-  (lite NNUE build, ~7 MB), one per color. Puzzles that ship precomputed
-  `lines` need no engine at all — the playout is deterministic playback;
-  everything else runs the engines live.
+- **Engines**: [Stockfish 18](https://stockfishchess.org/) WASM workers
+  (lite NNUE build, ~7 MB) with strict one-owner-per-engine lifecycles: a
+  persistent worker serves only the eval bar, and each live playout gets
+  a fresh disposable worker that plays both sides and is terminated on
+  any cancellation. (Overlapping searches wedge this WASM build
+  permanently, so engines are never shared across concerns — killing the
+  worker is the only reliable cancellation.) Puzzles that ship
+  precomputed `lines` need no engine at all — the playout is
+  deterministic playback; everything else runs the engine live.
 - **Puzzles**: contract objects in `src/puzzles/batch-*.js`; `npm test`
   validates shapes, placement constraints, solution legality, and replays
   every stored line to confirm it agrees with its verdict.

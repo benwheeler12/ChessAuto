@@ -84,8 +84,17 @@ export class Engine {
     return { move: line.split(/\s+/)[1], score };
   }
 
-  stop() {
-    this.worker?.postMessage('stop');
+  /**
+   * Kill the worker outright. Terminated workers cannot leak a stale
+   * search into anything — this is the only reliable cancellation for
+   * this WASM build (an overlapping 'go' wedges it permanently, and a
+   * wedged engine answers neither 'stop' nor 'isready').
+   */
+  terminate() {
+    this.worker?.terminate();
+    this.worker = null;
+    this.initPromise = null;
+    this.listeners.clear();
   }
 }
 
