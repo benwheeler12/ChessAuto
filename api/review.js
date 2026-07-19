@@ -24,8 +24,8 @@ const MAX_TEXT = 1000;
 /** Verify a Google ID token against our OAuth client id and return the
  * reviewer identity, or null when the token is missing/invalid/expired.
  * Uses Google's tokeninfo endpoint — one HTTPS round-trip, fine at review
- * volume, and Google does the signature check. Shared with my-reviews.js. */
-export async function verifyGoogleIdToken(idToken, clientId) {
+ * volume, and Google does the signature check. */
+async function verifyGoogleIdToken(idToken, clientId) {
   if (typeof idToken !== 'string' || !idToken) return null;
   try {
     const res = await fetch(

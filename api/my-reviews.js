@@ -8,7 +8,30 @@
 // only the structured fields are returned — no text, no other reviewers.
 
 import { list, get } from '@vercel/blob';
-import { verifyGoogleIdToken } from './review.js';
+
+/** Verify a Google ID token against our OAuth client id (same logic as in
+ * review.js — duplicated deliberately: api/ files importing sibling
+ * function files breaks the Vercel build). */
+async function verifyGoogleIdToken(idToken, clientId) {
+  if (typeof idToken !== 'string' || !idToken) return null;
+  try {
+    const res = await fetch(
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`,
+    );
+    if (!res.ok) return null;
+    const claims = await res.json();
+    if (claims.aud !== clientId) return null;
+    if (Number(claims.exp) * 1000 < Date.now()) return null;
+    if (String(claims.email_verified) !== 'true' || !claims.email) return null;
+    return {
+      email: claims.email.toLowerCase(),
+      name: claims.name ?? null,
+      sub: claims.sub ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
 
 async function readBlobJson(blob) {
   try {
