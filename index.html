@@ -65,6 +65,17 @@
             <span id="review-auth-user" hidden></span>
             <button id="review-signout" hidden>Sign out</button>
           </div>
+          <div class="curate-box" id="curate-box">
+            <div class="curate-row" id="curate-quality" aria-label="Rate this puzzle">
+              <button data-quality="great">★ Great</button>
+              <button data-quality="bad">👎 Bad</button>
+            </div>
+            <div class="curate-row" id="curate-difficulty" aria-label="Rate the difficulty">
+              <button data-difficulty="easy">Easy</button>
+              <button data-difficulty="medium">Medium</button>
+              <button data-difficulty="hard">Hard</button>
+            </div>
+          </div>
           <textarea id="review-text" rows="2" maxlength="1000"
             placeholder="Review this puzzle — what worked, what didn’t? (sent with your 👍/👎)"></textarea>
           <button id="review-send" class="secondary">Send review</button>

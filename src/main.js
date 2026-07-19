@@ -83,6 +83,43 @@ function markPlayed(id) {
   renderPuzzleOptions();
 }
 
+// ---- Curation (hand-picking the final set): quality + difficulty marks ----
+// Persisted locally and synced to the review store as structured fields so
+// the final-set assembly can read the picks programmatically.
+const curation = JSON.parse(localStorage.getItem('chessauto-curation') ?? '{}');
+
+function setCuration(id, key, value) {
+  const cur = curation[id] ?? {};
+  cur[key] = cur[key] === value ? null : value; // click again to clear
+  if (!cur.quality && !cur.difficulty) delete curation[id];
+  else curation[id] = cur;
+  localStorage.setItem('chessauto-curation', JSON.stringify(curation));
+  renderCuration();
+  postReview({
+    puzzleId: id,
+    rating: ratings[id] ?? null,
+    quality: cur.quality ?? null,
+    difficulty: cur.difficulty ?? null,
+  });
+}
+
+function renderCuration() {
+  const cur = curation[state.puzzle.id] ?? {};
+  for (const btn of document.querySelectorAll('#curate-quality button')) {
+    btn.classList.toggle('active', btn.dataset.quality === cur.quality);
+  }
+  for (const btn of document.querySelectorAll('#curate-difficulty button')) {
+    btn.classList.toggle('active', btn.dataset.difficulty === cur.difficulty);
+  }
+}
+
+for (const btn of document.querySelectorAll('#curate-quality button')) {
+  btn.addEventListener('click', () => setCuration(state.puzzle.id, 'quality', btn.dataset.quality));
+}
+for (const btn of document.querySelectorAll('#curate-difficulty button')) {
+  btn.addEventListener('click', () => setCuration(state.puzzle.id, 'difficulty', btn.dataset.difficulty));
+}
+
 function ratePuzzle(id, value) {
   ratings[id] = ratings[id] === value ? undefined : value;
   if (ratings[id] === undefined) delete ratings[id];
@@ -176,14 +213,16 @@ function initGoogleSignIn() {
 
 /** POST one review; resolves true on success. Silently tolerant of failure
  * (the API only exists on the deployed site, not in local dev). */
-async function postReview({ puzzleId, rating = null, text = '' }) {
+async function postReview({ puzzleId, rating = null, text = '', quality = null, difficulty = null }) {
   if (GOOGLE_CLIENT_ID && !signedIn()) return false; // auth required, not signed in
   const batchId = activePuzzles().find((p) => p.id === puzzleId)?.meta?.batch?.id ?? null;
   try {
     const res = await fetch('/api/review', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ puzzleId, batchId, rating, text, clientId, idToken: gauth.token }),
+      body: JSON.stringify({
+        puzzleId, batchId, rating, text, quality, difficulty, clientId, idToken: gauth.token,
+      }),
     });
     if (res.status === 401) authSignOut(); // token expired server-side — resurface the button
     return res.ok;
@@ -269,6 +308,7 @@ function loadPuzzle(index) {
   els.banner.classList.add('hidden');
   els.progress.classList.add('hidden');
   els.reviewText.value = '';
+  renderCuration();
   board.setOrientation(puzzle.player);
   showBaseEval();
   refreshSetup();

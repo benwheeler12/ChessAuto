@@ -50,8 +50,10 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'POST only' });
   }
-  const { puzzleId, batchId, rating = null, text = '', clientId = null, idToken = null } =
-    req.body ?? {};
+  const {
+    puzzleId, batchId, rating = null, text = '', clientId = null, idToken = null,
+    quality = null, difficulty = null,
+  } = req.body ?? {};
 
   // With an OAuth client configured, every review must carry a verified
   // Google identity. Without one (not yet set up), reviews stay anonymous.
@@ -69,11 +71,19 @@ export default async function handler(req, res) {
   if (typeof text !== 'string' || text.length > MAX_TEXT) {
     return res.status(400).json({ error: 'bad text' });
   }
-  if (!text.trim() && rating == null) {
+  if (!text.trim() && rating == null && quality == null && difficulty == null) {
     return res.status(400).json({ error: 'empty review' });
   }
   if (rating != null && rating !== 1 && rating !== -1) {
     return res.status(400).json({ error: 'bad rating' });
+  }
+  // Curation marks for the hand-picking workflow (see the curate buttons in
+  // the app). Null clears a previously sent mark.
+  if (quality != null && !['great', 'bad'].includes(quality)) {
+    return res.status(400).json({ error: 'bad quality' });
+  }
+  if (difficulty != null && !['easy', 'medium', 'hard'].includes(difficulty)) {
+    return res.status(400).json({ error: 'bad difficulty' });
   }
 
   const review = {
@@ -81,6 +91,8 @@ export default async function handler(req, res) {
     batchId: typeof batchId === 'string' ? batchId.slice(0, 16) : null,
     rating,
     text: text.trim(),
+    quality,
+    difficulty,
     clientId: typeof clientId === 'string' ? clientId.slice(0, 40) : null,
     reviewer,
     createdAt: new Date().toISOString(),

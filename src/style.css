@@ -143,6 +143,30 @@ main {
 .review-auth button { align-self: center; padding: 0.25rem 0.6rem; font-size: 0.8rem; font-weight: 500; }
 .review-box textarea:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* Curation buttons (hand-picking the final set): quality + difficulty */
+.curate-box { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; }
+.curate-row { display: flex; gap: 0.35rem; }
+.curate-row button {
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--panel-2);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.curate-row button:hover { color: var(--text); }
+#curate-quality button.active[data-quality="great"] {
+  background: #3c5220; border-color: var(--accent-2); color: #d9f0a8;
+}
+#curate-quality button.active[data-quality="bad"] {
+  background: #52231f; border-color: var(--danger); color: #f0b3ad;
+}
+#curate-difficulty button.active {
+  background: #1f3a52; border-color: #5a9bd4; color: #b8d9f5;
+}
+
 /* Coordinate labels on the edge squares */
 .square::before {
   content: attr(data-rank-label);
