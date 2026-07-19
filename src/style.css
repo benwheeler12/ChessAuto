@@ -160,6 +160,9 @@ main {
 #curate-quality button.active[data-quality="great"] {
   background: #3c5220; border-color: var(--accent-2); color: #d9f0a8;
 }
+#curate-quality button.active[data-quality="good"] {
+  background: #2e4a33; border-color: var(--accent); color: #bfe3c2;
+}
 #curate-quality button.active[data-quality="bad"] {
   background: #52231f; border-color: var(--danger); color: #f0b3ad;
 }
