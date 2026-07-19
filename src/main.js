@@ -311,8 +311,20 @@ function placements() {
 
 const allPlaced = () => state.tray.every((t) => t.square);
 
-const whiteEngine = new Engine('white');
-const blackEngine = new Engine('black');
+// Engine ownership model: every engine has exactly ONE caller, so two
+// searches can never overlap on the same worker (an overlapping 'go'
+// wedges this WASM build permanently — it stops answering everything).
+//  - evalEngine: persistent, owned solely by showBaseEval, which awaits
+//    its own previous search — serialized by construction.
+//  - playout: a FRESH disposable engine per run (it plays both sides),
+//    terminated on any cancellation. A dead worker can't leak state.
+const evalEngine = new Engine('eval');
+let playoutEngine = null;
+
+function killPlayoutEngine() {
+  playoutEngine?.terminate();
+  playoutEngine = null;
+}
 
 const board = new Board(els.board, { onSquareClick: handleSquareClick });
 
@@ -320,6 +332,7 @@ const board = new Board(els.board, { onSquareClick: handleSquareClick });
 
 function loadPuzzle(index) {
   state.runId++; // cancels any playout in flight
+  killPlayoutEngine(); // …and its engine with it — dead workers can't leak
   const puzzle = activePuzzles()[index];
   state.puzzle = puzzle;
   state.phase = 'setup';
@@ -363,10 +376,10 @@ async function showBaseEval() {
   setEvalBar(0);
   const fen = buildFen(state.baseMap, turnFor(state.puzzle));
   try {
-    await whiteEngine.init();
+    await evalEngine.init();
     if (state.baseEvalSearch) await state.baseEvalSearch.catch(() => {});
     if (token !== baseEvalToken || state.phase !== 'setup') return;
-    state.baseEvalSearch = whiteEngine.search(fen, 250);
+    state.baseEvalSearch = evalEngine.search(fen, 250);
     const { score } = await state.baseEvalSearch;
     state.baseEvalSearch = null;
     if (token !== baseEvalToken || state.phase !== 'setup') return;
@@ -743,6 +756,7 @@ els.tray.addEventListener('pointerdown', (e) => {
 
 function resetPlacements() {
   state.runId++;
+  killPlayoutEngine();
   state.phase = 'setup';
   if (state.tray.some((t) => t.square)) pushUndo();
   for (const item of state.tray) item.square = null;
@@ -809,19 +823,19 @@ async function play() {
   }
 
   if (!line) {
-    // Live path: the engines fill the buffer as fast as they can think.
-    if (state.baseEvalSearch) {
-      await state.baseEvalSearch.catch(() => {});
-      state.baseEvalSearch = null;
-    }
-    await Promise.all([whiteEngine.init(), blackEngine.init()]);
-    await Promise.all([whiteEngine.newGame(), blackEngine.newGame()]);
-    if (runId !== state.runId) return;
+    // Live path: a fresh engine for this run plays both sides and fills
+    // the buffer as fast as it can think. The WASM is cached after the
+    // first spawn, and the reveal animation below hides the startup.
+    killPlayoutEngine();
+    const engine = new Engine('playout');
+    playoutEngine = engine;
+    await engine.init();
+    await engine.newGame();
+    if (runId !== state.runId) { engine.terminate(); return; }
     (async () => {
       try {
         while (!game.isGameOver()) {
           const side = game.turn();
-          const engine = side === 'w' ? whiteEngine : blackEngine;
           const { move, score } = await engine.search(fen, MOVETIME_MS, uciMoves);
           if (runId !== state.runId) return;
           if (!move || move === '(none)') break;
@@ -997,6 +1011,7 @@ async function play() {
 
   if (runId !== state.runId) return;
   finish(game);
+  killPlayoutEngine(); // run over — free the worker (and its hash) now
 }
 
 /** The ~1s win/loss reveal on the placed piece(s); doubles as buffer-fill time. */
@@ -1160,8 +1175,7 @@ function drawReason(game) {
 }
 
 function stopPlayout() {
-  whiteEngine.stop();
-  blackEngine.stop();
+  killPlayoutEngine();
   resetPlacements();
   setStatus('Playout stopped and board reset. Place your pieces and try again.');
 }
@@ -1290,7 +1304,9 @@ els.speedSlider.addEventListener('input', () => {
 renderCollectionOptions();
 setCollection(0); // newest batch is always the default view
 
-Promise.all([whiteEngine.init(), blackEngine.init()])
+// Booting the eval engine also warms the browser cache for the WASM, so
+// per-run playout engines spawn fast afterwards.
+evalEngine.init()
   .then(() => {
     state.enginesReady = true;
     if (state.phase === 'setup') refreshSetup();
