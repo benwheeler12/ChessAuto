@@ -95,12 +95,7 @@ function setCuration(id, key, value) {
   else curation[id] = cur;
   localStorage.setItem('chessauto-curation', JSON.stringify(curation));
   renderCuration();
-  postReview({
-    puzzleId: id,
-    rating: ratings[id] ?? null,
-    quality: cur.quality ?? null,
-    difficulty: cur.difficulty ?? null,
-  });
+  postReview({ puzzleId: id, text: '', ...markSnapshot(id) });
 }
 
 function renderCuration() {
@@ -120,13 +115,24 @@ for (const btn of document.querySelectorAll('#curate-difficulty button')) {
   btn.addEventListener('click', () => setCuration(state.puzzle.id, 'difficulty', btn.dataset.difficulty));
 }
 
+/** Full snapshot of a puzzle's structured marks. Every review POST carries
+ * this, so "latest review per puzzle" is always the complete truth — that's
+ * what /api/my-reviews reduces to when another device syncs. */
+function markSnapshot(id) {
+  return {
+    rating: ratings[id] ?? null,
+    quality: curation[id]?.quality ?? null,
+    difficulty: curation[id]?.difficulty ?? null,
+  };
+}
+
 function ratePuzzle(id, value) {
   ratings[id] = ratings[id] === value ? undefined : value;
   if (ratings[id] === undefined) delete ratings[id];
   localStorage.setItem('chessauto-ratings', JSON.stringify(ratings));
   // Sync the rating to the review store (fire-and-forget) so thumbs count
   // as feedback even without a written review.
-  if (ratings[id] != null) postReview({ puzzleId: id, rating: ratings[id], text: '' });
+  postReview({ puzzleId: id, text: '', ...markSnapshot(id) });
 }
 
 // ---- Cloud reviews (the playtest-feedback loop's input) ----
@@ -169,6 +175,32 @@ function authUpdateUi() {
   els.reviewSend.disabled = !authed;
 }
 
+/** Pull this reviewer's marks from the server and merge them in, so a new
+ * device/session shows what's already been rated. Server wins for puzzles
+ * it knows about; purely-local marks (made while signed out) are kept. */
+async function syncMyMarks() {
+  if (!signedIn()) return;
+  try {
+    const res = await fetch('/api/my-reviews', {
+      headers: { Authorization: `Bearer ${gauth.token}` },
+    });
+    if (!res.ok) return;
+    const { marks } = await res.json();
+    for (const [id, m] of Object.entries(marks ?? {})) {
+      if (m.rating != null) ratings[id] = m.rating;
+      else delete ratings[id];
+      if (m.quality || m.difficulty) {
+        curation[id] = { quality: m.quality ?? null, difficulty: m.difficulty ?? null };
+      } else {
+        delete curation[id];
+      }
+    }
+    localStorage.setItem('chessauto-ratings', JSON.stringify(ratings));
+    localStorage.setItem('chessauto-curation', JSON.stringify(curation));
+    renderCuration();
+  } catch { /* offline or local dev — local marks stand */ }
+}
+
 function onGoogleCredential(response) {
   try {
     const b64 = response.credential.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
@@ -182,6 +214,7 @@ function onGoogleCredential(response) {
     sessionStorage.setItem('chessauto-gauth', JSON.stringify(gauth));
   } catch { /* malformed credential — stay signed out */ }
   authUpdateUi();
+  syncMyMarks();
 }
 
 function authSignOut() {
@@ -195,6 +228,7 @@ function initGoogleSignIn() {
   if (!GOOGLE_CLIENT_ID) return;
   authRestore();
   authUpdateUi();
+  syncMyMarks(); // restored session: pull marks made on other devices
   const script = document.createElement('script');
   script.src = 'https://accounts.google.com/gsi/client';
   script.async = true;
@@ -238,8 +272,8 @@ async function sendReviewText() {
   els.reviewSend.textContent = 'Sending…';
   const ok = await postReview({
     puzzleId: state.puzzle.id,
-    rating: ratings[state.puzzle.id] ?? null,
     text,
+    ...markSnapshot(state.puzzle.id),
   });
   els.reviewSend.disabled = false;
   els.reviewSend.textContent = 'Send review';
