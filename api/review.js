@@ -79,7 +79,7 @@ export default async function handler(req, res) {
   }
   // Curation marks for the hand-picking workflow (see the curate buttons in
   // the app). Null clears a previously sent mark.
-  if (quality != null && !['great', 'bad'].includes(quality)) {
+  if (quality != null && !['great', 'good', 'bad'].includes(quality)) {
     return res.status(400).json({ error: 'bad quality' });
   }
   if (difficulty != null && !['easy', 'medium', 'hard'].includes(difficulty)) {
