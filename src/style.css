@@ -35,7 +35,8 @@ header {
   text-align: center;
 }
 header h1 { margin: 0; font-size: 1.6rem; letter-spacing: 0.02em; }
-.tagline { margin: 0.25rem 0 0; color: var(--muted); font-size: 0.9rem; }
+.tagline { margin: 0.3rem 0 0; color: var(--text); font-size: 1.08rem; font-weight: 600; }
+.how-to { margin: 0.35rem auto 0; color: var(--muted); font-size: 0.88rem; max-width: 46rem; }
 
 main {
   display: flex;
