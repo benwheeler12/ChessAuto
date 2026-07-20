@@ -49,13 +49,18 @@ main {
 
 /* ---- Board ---- */
 
-/* Material totals per side, live during playouts */
+/* Material totals per side, above the board, live during playouts */
+.board-col { display: flex; flex-direction: column; gap: 0.4rem; }
 .material-line {
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--muted);
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text);
   letter-spacing: 0.01em;
+  padding: 0 0.15rem;
 }
+.material-line .mat-b { color: var(--muted); }
 
 /* While a piece is being pointer-dragged, no text may be selected */
 body.dragging, body.dragging * {
@@ -293,6 +298,16 @@ body.dragging, body.dragging * {
 .pc-bb { background-image: url('./assets/pieces/bB.svg'); }
 .pc-bn { background-image: url('./assets/pieces/bN.svg'); }
 .pc-bp { background-image: url('./assets/pieces/bP.svg'); }
+
+/* Black pieces get a light halo so they stand out on the dark squares */
+.pc-bk, .pc-bq, .pc-br, .pc-bb, .pc-bn, .pc-bp {
+  filter: drop-shadow(0 0 1.5px rgba(255, 255, 255, 0.7))
+    drop-shadow(0 0 3px rgba(255, 255, 255, 0.35));
+}
+.piece.placed.pc-bk, .piece.placed.pc-bq, .piece.placed.pc-br,
+.piece.placed.pc-bb, .piece.placed.pc-bn, .piece.placed.pc-bp {
+  filter: drop-shadow(0 0 5px #ffd24d) drop-shadow(0 0 1.5px rgba(255, 255, 255, 0.7));
+}
 
 .banner {
   position: absolute;
