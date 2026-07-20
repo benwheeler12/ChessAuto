@@ -49,6 +49,21 @@ main {
 
 /* ---- Board ---- */
 
+/* Material totals per side, live during playouts */
+.material-line {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.01em;
+}
+
+/* While a piece is being pointer-dragged, no text may be selected */
+body.dragging, body.dragging * {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+
 .board-area { display: flex; gap: 0.6rem; }
 
 .eval-bar {
@@ -120,55 +135,6 @@ main {
    that start on a piece (scrolling would eat the drag). */
 .piece.placed,
 .tray-piece { touch-action: none; }
-
-/* Per-puzzle review box (feeds the daily playtest-feedback loop) */
-.review-box { display: flex; flex-direction: column; gap: 0.4rem; }
-.review-box textarea {
-  background: var(--panel-2);
-  color: var(--text);
-  border: 1px solid transparent;
-  border-radius: 8px;
-  padding: 0.5rem 0.6rem;
-  font: inherit;
-  font-size: 0.88rem;
-  resize: vertical;
-  min-height: 2.6rem;
-}
-.review-box textarea:focus { outline: none; border-color: var(--accent); }
-.review-box button { align-self: flex-end; padding: 0.4rem 0.8rem; border: none; border-radius: 8px; background: var(--panel-2); color: var(--text); font-weight: 600; cursor: pointer; }
-.review-box button:disabled { opacity: 0.45; cursor: default; }
-.review-auth { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; font-size: 0.85rem; color: var(--muted, #9aa); }
-.review-auth[hidden] { display: none; }
-.review-auth #review-auth-user { color: var(--text); }
-.review-auth button { align-self: center; padding: 0.25rem 0.6rem; font-size: 0.8rem; font-weight: 500; }
-.review-box textarea:disabled { opacity: 0.5; cursor: not-allowed; }
-
-/* Curation buttons (hand-picking the final set): quality + difficulty */
-.curate-box { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; }
-.curate-row { display: flex; gap: 0.35rem; }
-.curate-row button {
-  padding: 0.3rem 0.7rem;
-  border: 1px solid var(--panel-2);
-  border-radius: 999px;
-  background: var(--panel-2);
-  color: var(--muted);
-  font-size: 0.82rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-.curate-row button:hover { color: var(--text); }
-#curate-quality button.active[data-quality="great"] {
-  background: #3c5220; border-color: var(--accent-2); color: #d9f0a8;
-}
-#curate-quality button.active[data-quality="good"] {
-  background: #2e4a33; border-color: var(--accent); color: #bfe3c2;
-}
-#curate-quality button.active[data-quality="bad"] {
-  background: #52231f; border-color: var(--danger); color: #f0b3ad;
-}
-#curate-difficulty button.active {
-  background: #1f3a52; border-color: #5a9bd4; color: #b8d9f5;
-}
 
 /* Coordinate labels on the edge squares */
 .square::before {
@@ -455,20 +421,6 @@ main {
 }
 
 /* Collection selector */
-.collection-label {
-  font-size: 0.8rem;
-  color: var(--muted);
-}
-.collection-hint { opacity: 0.7; }
-.collection-select {
-  width: 100%;
-  background: var(--panel-2);
-  color: var(--text);
-  border: 1px solid #00000055;
-  border-radius: 6px;
-  padding: 0.45rem;
-  font-size: 0.9rem;
-}
 
 /* Rule chips derived from the puzzle contract */
 .rule-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
@@ -482,27 +434,6 @@ main {
 }
 
 /* Fun rating on the results banner */
-.rating-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-top: 0.4rem;
-  position: relative;
-  z-index: 2;
-  font-size: 0.85rem;
-  color: var(--muted);
-}
-.rating-row button {
-  font-size: 1.15rem;
-  background: var(--panel-2);
-  border: 1px solid #00000055;
-  border-radius: 8px;
-  padding: 0.25rem 0.55rem;
-  cursor: pointer;
-  filter: grayscale(0.7);
-}
-.rating-row button:hover { filter: none; }
-.rating-row button.active { filter: none; outline: 2px solid var(--accent); }
 
 .puzzle-nav { display: flex; gap: 0.4rem; min-width: 0; }
 .puzzle-nav select {
@@ -620,16 +551,6 @@ button.lichess-btn:hover { color: var(--text); border-color: var(--muted); }
   color: var(--text);
 }
 
-.movelist {
-  margin: 0;
-  padding: 0 0 0 2.2rem;
-  max-height: 200px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  font-size: 0.88rem;
-  font-variant-numeric: tabular-nums;
-}
-.movelist li { margin-bottom: 0.15rem; }
 
 footer {
   text-align: center;
@@ -643,5 +564,4 @@ footer a { color: var(--accent-2); }
 
 @media (max-width: 760px) {
   main { padding: 0.75rem; }
-  .movelist { max-height: 140px; }
 }

@@ -45,9 +45,6 @@
 
         <div class="status" id="status">Loading engines…</div>
 
-        <label class="collection-label" for="collection-select">Puzzle collection <span class="collection-hint">(newest first)</span></label>
-        <select id="collection-select" class="collection-select"></select>
-
         <div class="puzzle-nav">
           <button id="prev-puzzle" title="Previous puzzle">◀</button>
           <select id="puzzle-select"></select>
@@ -55,32 +52,9 @@
         </div>
 
         <h2 id="puzzle-name"></h2>
+        <div id="material-line" class="material-line"></div>
         <div id="rule-chips" class="rule-chips"></div>
         <p id="puzzle-desc" class="desc"></p>
-
-        <div class="review-box">
-          <div id="review-auth" class="review-auth" hidden>
-            <span id="review-auth-note">Sign in to leave reviews:</span>
-            <div id="gsi-button"></div>
-            <span id="review-auth-user" hidden></span>
-            <button id="review-signout" hidden>Sign out</button>
-          </div>
-          <div class="curate-box" id="curate-box">
-            <div class="curate-row" id="curate-quality" aria-label="Rate this puzzle">
-              <button data-quality="great">★ Great</button>
-              <button data-quality="good">👍 Good</button>
-              <button data-quality="bad">👎 Bad</button>
-            </div>
-            <div class="curate-row" id="curate-difficulty" aria-label="Rate the difficulty">
-              <button data-difficulty="easy">Easy</button>
-              <button data-difficulty="medium">Medium</button>
-              <button data-difficulty="hard">Hard</button>
-            </div>
-          </div>
-          <textarea id="review-text" rows="2" maxlength="1000"
-            placeholder="Review this puzzle — what worked, what didn’t? (sent with your 👍/👎)"></textarea>
-          <button id="review-send" class="secondary">Send review</button>
-        </div>
 
         <div class="speed-row">
           <label for="speed-slider">Move speed</label>
@@ -89,7 +63,6 @@
         </div>
 
         <div class="progress hidden" id="progress"></div>
-        <ol class="movelist" id="movelist"></ol>
       </aside>
     </main>
 

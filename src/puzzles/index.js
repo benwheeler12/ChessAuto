@@ -15,9 +15,11 @@ const BATCHES = Object.keys(modules)
   .map((path) => modules[path].default)
   .filter((puzzles) => puzzles?.length);
 
-/** Collections, newest first — the first entry is the site's default view. */
+/** The finished product shows exactly one collection: The Final Set
+ * (b018). Other batch files remain on disk as the curation corpus and
+ * for generator dedup, but the UI never sees them. */
 export const COLLECTIONS = BATCHES
   .map((puzzles) => ({ ...puzzles[0].meta.batch, puzzles }))
-  .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  .filter((c) => c.id === 'b018');
 
 export const PUZZLES = COLLECTIONS.flatMap((c) => c.puzzles);

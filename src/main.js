@@ -35,11 +35,11 @@ const els = {
   board: $('board'),
   banner: $('banner'),
   evalFill: $('eval-fill'),
-  collectionSelect: $('collection-select'),
   puzzleSelect: $('puzzle-select'),
   prevPuzzle: $('prev-puzzle'),
   nextPuzzle: $('next-puzzle'),
   puzzleName: $('puzzle-name'),
+  materialLine: $('material-line'),
   puzzleDesc: $('puzzle-desc'),
   ruleChips: $('rule-chips'),
   status: $('status'),
@@ -53,15 +53,7 @@ const els = {
   continueBtn: $('continue-btn'),
   retryBtn: $('retry-btn'),
   lichessBtn: $('lichess-btn'),
-  reviewText: $('review-text'),
-  reviewSend: $('review-send'),
-  reviewAuth: $('review-auth'),
-  reviewAuthNote: $('review-auth-note'),
-  reviewAuthUser: $('review-auth-user'),
-  reviewSignout: $('review-signout'),
-  gsiButton: $('gsi-button'),
   progress: $('progress'),
-  movelist: $('movelist'),
   speedSlider: $('speed-slider'),
   speedValue: $('speed-value'),
 };
@@ -71,220 +63,29 @@ function moveAnimMs() {
   return Number(els.speedSlider.value) || DEFAULT_ANIM_MS;
 }
 
-// ---- Played / rating history (drives NEW badges and the fun-research loop) ----
+// ---- Played history (drives the • unplayed markers) ----
 const played = new Set(JSON.parse(localStorage.getItem('chessauto-played') ?? '[]'));
-const ratings = JSON.parse(localStorage.getItem('chessauto-ratings') ?? '{}');
 
 function markPlayed(id) {
   if (played.has(id)) return;
   played.add(id);
   localStorage.setItem('chessauto-played', JSON.stringify([...played]));
-  renderCollectionOptions();
   renderPuzzleOptions();
 }
 
-// ---- Curation (hand-picking the final set): quality + difficulty marks ----
-// Persisted locally and synced to the review store as structured fields so
-// the final-set assembly can read the picks programmatically.
-const curation = JSON.parse(localStorage.getItem('chessauto-curation') ?? '{}');
+// ---- Material counter ----
+// Total piece value per side, shown above the puzzle and kept live during
+// playouts. In setup it includes the player's still-unplayed tray pieces,
+// so the number reflects the full army the position will start with.
+const PIECE_VALUES = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 
-function setCuration(id, key, value) {
-  const cur = curation[id] ?? {};
-  cur[key] = cur[key] === value ? null : value; // click again to clear
-  if (!cur.quality && !cur.difficulty) delete curation[id];
-  else curation[id] = cur;
-  localStorage.setItem('chessauto-curation', JSON.stringify(curation));
-  renderCuration();
-  postReview({ puzzleId: id, text: '', ...markSnapshot(id) });
-}
-
-function renderCuration() {
-  const cur = curation[state.puzzle.id] ?? {};
-  for (const btn of document.querySelectorAll('#curate-quality button')) {
-    btn.classList.toggle('active', btn.dataset.quality === cur.quality);
+function showMaterial(map, { includeTray = false } = {}) {
+  const total = { w: 0, b: 0 };
+  for (const piece of Object.values(map)) total[piece.color] += PIECE_VALUES[piece.type];
+  if (includeTray) {
+    for (const t of state.tray) if (!t.square) total[state.puzzle.player] += PIECE_VALUES[t.type];
   }
-  for (const btn of document.querySelectorAll('#curate-difficulty button')) {
-    btn.classList.toggle('active', btn.dataset.difficulty === cur.difficulty);
-  }
-}
-
-for (const btn of document.querySelectorAll('#curate-quality button')) {
-  btn.addEventListener('click', () => setCuration(state.puzzle.id, 'quality', btn.dataset.quality));
-}
-for (const btn of document.querySelectorAll('#curate-difficulty button')) {
-  btn.addEventListener('click', () => setCuration(state.puzzle.id, 'difficulty', btn.dataset.difficulty));
-}
-
-/** Full snapshot of a puzzle's structured marks. Every review POST carries
- * this, so "latest review per puzzle" is always the complete truth — that's
- * what /api/my-reviews reduces to when another device syncs. */
-function markSnapshot(id) {
-  return {
-    rating: ratings[id] ?? null,
-    quality: curation[id]?.quality ?? null,
-    difficulty: curation[id]?.difficulty ?? null,
-  };
-}
-
-function ratePuzzle(id, value) {
-  ratings[id] = ratings[id] === value ? undefined : value;
-  if (ratings[id] === undefined) delete ratings[id];
-  localStorage.setItem('chessauto-ratings', JSON.stringify(ratings));
-  // Sync the rating to the review store (fire-and-forget) so thumbs count
-  // as feedback even without a written review.
-  postReview({ puzzleId: id, text: '', ...markSnapshot(id) });
-}
-
-// ---- Cloud reviews (the playtest-feedback loop's input) ----
-const clientId = (() => {
-  let id = localStorage.getItem('chessauto-client');
-  if (!id) {
-    id = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
-    localStorage.setItem('chessauto-client', id);
-  }
-  return id;
-})();
-
-// ---- Reviewer identity (Google sign-in) ----
-// When VITE_GOOGLE_CLIENT_ID is set at build time, reviews require a Google
-// sign-in: the ID token rides along with each POST and the API verifies it
-// and records the reviewer's email (which the backend allowlist then vets).
-// Without a client id the review box behaves as before (anonymous).
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || null;
-const gauth = { token: null, email: null, name: null, exp: 0 };
-
-function authRestore() {
-  try {
-    const saved = JSON.parse(sessionStorage.getItem('chessauto-gauth') ?? 'null');
-    if (saved?.token && saved.exp * 1000 > Date.now() + 60_000) Object.assign(gauth, saved);
-  } catch { /* ignore */ }
-}
-
-const signedIn = () => !!gauth.token && gauth.exp * 1000 > Date.now() + 30_000;
-
-function authUpdateUi() {
-  if (!GOOGLE_CLIENT_ID) return; // anonymous mode: auth row stays hidden
-  els.reviewAuth.hidden = false;
-  const authed = signedIn();
-  els.reviewAuthNote.hidden = authed;
-  els.gsiButton.hidden = authed;
-  els.reviewAuthUser.hidden = !authed;
-  els.reviewSignout.hidden = !authed;
-  if (authed) els.reviewAuthUser.textContent = `Reviewing as ${gauth.email}`;
-  els.reviewText.disabled = !authed;
-  els.reviewSend.disabled = !authed;
-}
-
-/** Pull this reviewer's marks from the server and merge them in, so a new
- * device/session shows what's already been rated. Server wins for puzzles
- * it knows about; purely-local marks (made while signed out) are kept. */
-async function syncMyMarks() {
-  if (!signedIn()) return;
-  try {
-    const res = await fetch('/api/my-reviews', {
-      headers: { Authorization: `Bearer ${gauth.token}` },
-    });
-    if (!res.ok) return;
-    const { marks } = await res.json();
-    for (const [id, m] of Object.entries(marks ?? {})) {
-      if (m.rating != null) ratings[id] = m.rating;
-      else delete ratings[id];
-      if (m.quality || m.difficulty) {
-        curation[id] = { quality: m.quality ?? null, difficulty: m.difficulty ?? null };
-      } else {
-        delete curation[id];
-      }
-    }
-    localStorage.setItem('chessauto-ratings', JSON.stringify(ratings));
-    localStorage.setItem('chessauto-curation', JSON.stringify(curation));
-    renderCuration();
-  } catch { /* offline or local dev — local marks stand */ }
-}
-
-function onGoogleCredential(response) {
-  try {
-    const b64 = response.credential.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    const claims = JSON.parse(atob(b64));
-    Object.assign(gauth, {
-      token: response.credential,
-      email: claims.email ?? '(unknown)',
-      name: claims.name ?? null,
-      exp: claims.exp ?? 0,
-    });
-    sessionStorage.setItem('chessauto-gauth', JSON.stringify(gauth));
-  } catch { /* malformed credential — stay signed out */ }
-  authUpdateUi();
-  syncMyMarks();
-}
-
-function authSignOut() {
-  Object.assign(gauth, { token: null, email: null, name: null, exp: 0 });
-  sessionStorage.removeItem('chessauto-gauth');
-  window.google?.accounts?.id?.disableAutoSelect?.();
-  authUpdateUi();
-}
-
-function initGoogleSignIn() {
-  if (!GOOGLE_CLIENT_ID) return;
-  authRestore();
-  authUpdateUi();
-  syncMyMarks(); // restored session: pull marks made on other devices
-  const script = document.createElement('script');
-  script.src = 'https://accounts.google.com/gsi/client';
-  script.async = true;
-  script.onload = () => {
-    window.google.accounts.id.initialize({
-      client_id: GOOGLE_CLIENT_ID,
-      callback: onGoogleCredential,
-      auto_select: true,
-    });
-    window.google.accounts.id.renderButton(els.gsiButton, {
-      theme: 'outline', size: 'medium', text: 'signin_with', shape: 'pill',
-    });
-  };
-  document.head.append(script);
-}
-
-/** POST one review; resolves true on success. Silently tolerant of failure
- * (the API only exists on the deployed site, not in local dev). */
-async function postReview({ puzzleId, rating = null, text = '', quality = null, difficulty = null }) {
-  if (GOOGLE_CLIENT_ID && !signedIn()) return false; // auth required, not signed in
-  const batchId = activePuzzles().find((p) => p.id === puzzleId)?.meta?.batch?.id ?? null;
-  try {
-    const res = await fetch('/api/review', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        puzzleId, batchId, rating, text, quality, difficulty, clientId, idToken: gauth.token,
-      }),
-    });
-    if (res.status === 401) authSignOut(); // token expired server-side — resurface the button
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-async function sendReviewText() {
-  const text = els.reviewText.value.trim();
-  if (!text) return;
-  els.reviewSend.disabled = true;
-  els.reviewSend.textContent = 'Sending…';
-  const ok = await postReview({
-    puzzleId: state.puzzle.id,
-    text,
-    ...markSnapshot(state.puzzle.id),
-  });
-  els.reviewSend.disabled = false;
-  els.reviewSend.textContent = 'Send review';
-  if (ok) {
-    els.reviewText.value = '';
-    setStatus('Review sent — thank you! It feeds the next batch of puzzles.');
-  } else if (GOOGLE_CLIENT_ID && !signedIn()) {
-    setStatus('Sign in with Google above to send reviews.', true);
-  } else {
-    setStatus('Couldn’t send the review — are you on the deployed site?', true);
-  }
+  els.materialLine.textContent = `Material — White ${total.w} · Black ${total.b}`;
 }
 
 // ---- State ----
@@ -342,7 +143,7 @@ function loadPuzzle(index) {
   undoStack.length = 0;
 
   els.puzzleSelect.value = String(index);
-  els.puzzleName.textContent = puzzle.name;
+  els.puzzleName.textContent = `Puzzle ${index + 1}`;
   els.puzzleDesc.textContent = puzzle.description;
   els.ruleChips.innerHTML = '';
   for (const chip of ruleChips(puzzle)) {
@@ -351,11 +152,8 @@ function loadPuzzle(index) {
     span.textContent = chip;
     els.ruleChips.appendChild(span);
   }
-  els.movelist.innerHTML = '';
   els.banner.classList.add('hidden');
   els.progress.classList.add('hidden');
-  els.reviewText.value = '';
-  renderCuration();
   board.setOrientation(puzzle.player);
   showBaseEval();
   refreshSetup();
@@ -402,6 +200,7 @@ function refreshSetup() {
   const puzzle = state.puzzle;
   board.setPosition(currentMap());
   board.clearHighlights('hint', 'bad', 'last-move', 'selected', 'option', 'excluded', 'illegal');
+  showMaterial(currentMap(), { includeTray: true });
   renderTray();
 
   const remaining = state.tray.filter((t) => !t.square).length;
@@ -425,11 +224,30 @@ function refreshSetup() {
     board.highlight(sq, 'excluded');
   }
   // Selecting a pawn dims the back ranks it can never stand on.
-  const selectedType = state.tray[state.selectedTray]?.type;
+  const selectedItem0 = state.tray[state.selectedTray];
+  const selectedType = selectedItem0?.type;
   if (selectedType === 'p') {
     for (const file of 'abcdefgh') {
       for (const rank of [1, 8]) {
         if (!map[file + rank]) board.highlight(file + rank, 'illegal');
+      }
+    }
+  }
+  // Selecting a bishop dims every square of a shade a friendly bishop
+  // already holds — same-shade bishop pairs are not allowed.
+  if (selectedType === 'b') {
+    const takenShades = new Set();
+    for (const [sq, piece] of Object.entries(map)) {
+      if (piece.type === 'b' && piece.color === puzzle.player && sq !== selectedItem0?.square) {
+        takenShades.add(squareShade(sq));
+      }
+    }
+    if (takenShades.size) {
+      for (const file of 'abcdefgh') {
+        for (let rank = 1; rank <= 8; rank++) {
+          const sq = file + rank;
+          if (!map[sq] && takenShades.has(squareShade(sq))) board.highlight(sq, 'illegal');
+        }
       }
     }
   }
@@ -539,6 +357,22 @@ function handleSquareClick(square) {
   if (state.selectedTray >= 0) placeSelected(square);
 }
 
+/** 0 = dark square, 1 = light square. */
+const squareShade = (sq) => (sq.charCodeAt(0) - 97 + Number(sq[1])) % 2;
+
+/** Bishops must stand on opposite shades: placing `type` on `square` is
+ * refused when a friendly bishop already holds that shade. */
+function bishopShadeError(type, square, occupied) {
+  if (type !== 'b') return null;
+  for (const [sq, piece] of Object.entries(occupied)) {
+    if (piece.type === 'b' && piece.color === state.puzzle.player
+      && squareShade(sq) === squareShade(square)) {
+      return 'A friendly bishop already covers that square color — bishops must stand on opposite shades.';
+    }
+  }
+  return null;
+}
+
 /** Board occupancy as placementError expects it, minus the given pieces. */
 function occupiedExcept(...items) {
   const map = { ...state.baseMap };
@@ -580,13 +414,15 @@ async function placeSelected(square, { animate = true } = {}) {
   const target = state.tray.find((t) => t !== item && t.square === square) ?? null;
   // Validate against the board without the pieces that are moving.
   const occupied = occupiedExcept(item, ...(target ? [target] : []));
-  const error = placementError(state.puzzle, square, item.type, occupied);
+  const error = placementError(state.puzzle, square, item.type, occupied)
+    ?? bishopShadeError(item.type, square, occupied);
   if (error) {
     setStatus(error, true);
     return;
   }
   if (target && fromSquare) {
-    const swapError = placementError(state.puzzle, fromSquare, target.type, occupied);
+    const swapError = placementError(state.puzzle, fromSquare, target.type, occupied)
+      ?? bishopShadeError(target.type, fromSquare, occupied);
     if (swapError) {
       setStatus(`Can’t swap those pieces: ${swapError}`, true);
       return;
@@ -649,6 +485,7 @@ function beginPieceDrag(e, payload, sourceEl) {
   drag.moved = false;
   drag.startX = e.clientX;
   drag.startY = e.clientY;
+  document.body.classList.add('dragging'); // suppress text selection while dragging
   document.addEventListener('pointermove', onDragMove);
   document.addEventListener('pointerup', onDragEnd);
   document.addEventListener('pointercancel', cancelDrag);
@@ -730,6 +567,7 @@ function cancelDrag() {
 }
 
 function cleanupDrag() {
+  document.body.classList.remove('dragging');
   document.removeEventListener('pointermove', onDragMove);
   document.removeEventListener('pointerup', onDragEnd);
   document.removeEventListener('pointercancel', cancelDrag);
@@ -761,7 +599,6 @@ function resetPlacements() {
   if (state.tray.some((t) => t.square)) pushUndo();
   for (const item of state.tray) item.square = null;
   state.selectedTray = -1;
-  els.movelist.innerHTML = '';
   els.banner.classList.add('hidden');
   els.progress.classList.add('hidden');
   setEvalBar(state.baseCp ?? 0);
@@ -782,7 +619,6 @@ async function play() {
   els.resetBtn.classList.add('hidden'); // during playout, Stop is the only control
   els.trayLabel.classList.add('hidden');
   els.tray.classList.add('hidden');
-  els.movelist.innerHTML = '';
   els.banner.classList.add('hidden');
   els.progress.classList.remove('hidden');
   board.clearHighlights('hint', 'bad', 'selected', 'option', 'excluded');
@@ -877,7 +713,7 @@ async function play() {
     if (runId !== state.runId) return;
     flashCapture(mv);
     state.playoutFen = item.fen;
-    appendMove(mv, item.moveNo);
+    showMaterial(fenToMap(item.fen));
     // Fifty-move rule watch: the FEN's halfmove clock counts plies since the
     // last capture or pawn move; at 100 the game is drawn. Surface it once a
     // draw is genuinely on the horizon so long grinds aren't a mystery.
@@ -930,6 +766,7 @@ async function play() {
       }
       setEvalBar(shown ? shown.whiteCp : (state.baseCp ?? 0));
       state.playoutFen = shown ? shown.fen : fen;
+      showMaterial(fenToMap(shown ? shown.fen : fen));
       progressText();
       syncButtons();
     };
@@ -960,7 +797,7 @@ async function play() {
       flashCapture(mv);
       setEvalBar(item.whiteCp);
       state.playoutFen = item.fen;
-      appendMove(mv, item.moveNo);
+      showMaterial(fenToMap(item.fen));
       progressText();
       stepping = false;
       syncButtons();
@@ -1030,22 +867,6 @@ async function playReveal() {
   }
 }
 
-function appendMove(mv, fenMoveNo) {
-  const moveNo = mv.color === 'w' ? fenMoveNo : fenMoveNo - 1;
-  const last = els.movelist.lastElementChild;
-  if (mv.color === 'b' && last && Number(last.value) === moveNo && !last.dataset.complete) {
-    last.textContent += `  ${mv.san}`;
-    last.dataset.complete = '1';
-  } else {
-    const li = document.createElement('li');
-    li.value = moveNo;
-    li.textContent = mv.color === 'w' ? mv.san : `… ${mv.san}`;
-    if (mv.color === 'b') li.dataset.complete = '1';
-    els.movelist.appendChild(li);
-  }
-  els.movelist.scrollTop = els.movelist.scrollHeight;
-}
-
 function finish(game) {
   const player = state.puzzle.player;
   const playerName = player === 'w' ? 'White' : 'Black';
@@ -1097,7 +918,7 @@ function finish(game) {
   }
   const p = document.createElement('p');
   p.textContent = detail;
-  els.banner.append(h2, p, buildRatingRow());
+  els.banner.append(h2, p);
 
   els.stopBtn.classList.add('hidden');
   els.backBtn.classList.add('hidden');
@@ -1107,28 +928,6 @@ function finish(game) {
   setStatus(win
     ? 'You built a winning position. Try the next puzzle!'
     : 'Adjust your piece placement and try again.', !win);
-}
-
-/** 👍/👎 row on the results banner — the fun-research feedback signal. */
-function buildRatingRow() {
-  const row = document.createElement('div');
-  row.className = 'rating-row';
-  const label = document.createElement('span');
-  label.textContent = 'Fun puzzle?';
-  row.appendChild(label);
-  for (const [value, glyph] of [[1, '👍'], [-1, '👎']]) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = glyph;
-    btn.classList.toggle('active', ratings[state.puzzle.id] === value);
-    btn.addEventListener('click', () => {
-      ratePuzzle(state.puzzle.id, value);
-      for (const b of row.querySelectorAll('button')) b.classList.remove('active');
-      if (ratings[state.puzzle.id] === value) btn.classList.add('active');
-    });
-    row.appendChild(btn);
-  }
-  return row;
 }
 
 /** Gentle confetti rain over the whole board for the win banner. */
@@ -1175,16 +974,18 @@ function drawReason(game) {
 }
 
 function stopPlayout() {
+  // Stop cancels the playout but KEEPS the placements, so the player can
+  // nudge their construction instead of rebuilding it from scratch.
   killPlayoutEngine();
-  resetPlacements();
-  setStatus('Playout stopped and board reset. Place your pieces and try again.');
+  state.runId++;
+  backToSetup();
+  setStatus('Playout stopped — adjust your pieces and play it out again.');
 }
 
 function backToSetup() {
   state.phase = 'setup';
   els.banner.classList.add('hidden');
   els.progress.classList.add('hidden');
-  els.movelist.innerHTML = '';
   setEvalBar(state.baseCp ?? 0);
   refreshSetup();
 }
@@ -1224,40 +1025,18 @@ function pieceName(type) {
 
 // ---- Collections & wiring ----
 
-function renderCollectionOptions() {
-  const current = els.collectionSelect.value;
-  els.collectionSelect.innerHTML = '';
-  COLLECTIONS.forEach((collection, i) => {
-    const fresh = collection.puzzles.filter((p) => !played.has(p.id)).length;
-    const date = new Date(collection.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-    const opt = document.createElement('option');
-    opt.value = String(i);
-    opt.textContent = `${collection.label} — ${date}${fresh ? ` (${fresh} new)` : ''}`;
-    els.collectionSelect.appendChild(opt);
-  });
-  els.collectionSelect.value = current !== '' && Number(current) < COLLECTIONS.length ? current : String(state.collection);
-}
-
 function renderPuzzleOptions() {
   const current = els.puzzleSelect.value;
   els.puzzleSelect.innerHTML = '';
   activePuzzles().forEach((p, i) => {
     const opt = document.createElement('option');
     opt.value = String(i);
-    opt.textContent = `${i + 1}. ${p.name}${played.has(p.id) ? '' : ' •'}`;
+    opt.textContent = `Puzzle ${i + 1}${played.has(p.id) ? '' : ' •'}`;
     els.puzzleSelect.appendChild(opt);
   });
   if (current !== '' && Number(current) < activePuzzles().length) els.puzzleSelect.value = current;
 }
 
-function setCollection(index) {
-  state.collection = index;
-  els.collectionSelect.value = String(index);
-  renderPuzzleOptions();
-  loadPuzzle(0);
-}
-
-els.collectionSelect.addEventListener('change', () => setCollection(Number(els.collectionSelect.value)));
 els.puzzleSelect.addEventListener('change', () => loadPuzzle(Number(els.puzzleSelect.value)));
 els.prevPuzzle.addEventListener('click', () => {
   loadPuzzle((Number(els.puzzleSelect.value) + activePuzzles().length - 1) % activePuzzles().length);
@@ -1273,9 +1052,6 @@ els.lichessBtn.addEventListener('click', openInLichess);
 els.backBtn.addEventListener('click', () => state.pauseControls?.back());
 els.fwdBtn.addEventListener('click', () => state.pauseControls?.fwd());
 els.continueBtn.addEventListener('click', () => state.pauseControls?.cont());
-els.reviewSend.addEventListener('click', sendReviewText);
-els.reviewSignout.addEventListener('click', authSignOut);
-initGoogleSignIn();
 document.addEventListener('keydown', (e) => {
   if (state.pauseControls) {
     if (e.key === 'ArrowLeft') { e.preventDefault(); state.pauseControls.back(); }
@@ -1301,8 +1077,8 @@ els.speedSlider.addEventListener('input', () => {
   localStorage.setItem('chessauto-speed', els.speedSlider.value);
 });
 
-renderCollectionOptions();
-setCollection(0); // newest batch is always the default view
+renderPuzzleOptions();
+loadPuzzle(0);
 
 // Booting the eval engine also warms the browser cache for the WASM, so
 // per-run playout engines spawn fast afterwards.
