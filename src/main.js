@@ -153,8 +153,12 @@ function loadPuzzle(index) {
   els.puzzleName.textContent = `Puzzle ${index + 1}`;
   const playerName = puzzle.player === 'w' ? 'White' : 'Black';
   const moverName = turnFor(puzzle) === 'w' ? 'White' : 'Black';
+  const winners = puzzle.solutions?.length ?? 1;
+  const winnersWord = ['zero', 'one', 'two', 'three', 'four'][winners] ?? String(winners);
   els.howTo.textContent = `Place the missing pieces on the board so the position is winning for ${playerName}. `
-    + `Then watch the game play out between two Stockfish engines. ${moverName} to move.`;
+    + `Then watch the game play out between two Stockfish engines. `
+    + `Most combinations lose or draw; at most only ${winnersWord} combination${winners === 1 ? ' is' : 's are'} winning for ${playerName}. `
+    + `${moverName} to move.`;
   // Show only the task instructions — the source-game provenance sentence
   // ("From a Lichess game (…), around move N.") stays in the data, not the UI.
   els.puzzleDesc.textContent = puzzle.description
