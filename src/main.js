@@ -144,7 +144,10 @@ function loadPuzzle(index) {
 
   els.puzzleSelect.value = String(index);
   els.puzzleName.textContent = `Puzzle ${index + 1}`;
-  els.puzzleDesc.textContent = puzzle.description;
+  // Show only the task instructions — the source-game provenance sentence
+  // ("From a Lichess game (…), around move N.") stays in the data, not the UI.
+  els.puzzleDesc.textContent = puzzle.description
+    .replace(/^From a Lichess game \([^)]*\), around move \d+\.\s*/, '');
   els.ruleChips.innerHTML = '';
   for (const chip of ruleChips(puzzle)) {
     const span = document.createElement('span');
