@@ -85,7 +85,13 @@ function showMaterial(map, { includeTray = false } = {}) {
   if (includeTray) {
     for (const t of state.tray) if (!t.square) total[state.puzzle.player] += PIECE_VALUES[t.type];
   }
-  els.materialLine.textContent = `Material — White ${total.w} · Black ${total.b}`;
+  els.materialLine.innerHTML = '';
+  for (const [side, label] of [['w', 'White'], ['b', 'Black']]) {
+    const span = document.createElement('span');
+    span.className = `mat-${side}`;
+    span.textContent = `${label} ${total[side]}`;
+    els.materialLine.appendChild(span);
+  }
 }
 
 // ---- State ----
@@ -147,7 +153,9 @@ function loadPuzzle(index) {
   // Show only the task instructions — the source-game provenance sentence
   // ("From a Lichess game (…), around move N.") stays in the data, not the UI.
   els.puzzleDesc.textContent = puzzle.description
-    .replace(/^From a Lichess game \([^)]*\), around move \d+\.\s*/, '');
+    .replace(/^From a Lichess game \([^)]*\), around move \d+\.\s*/, '')
+    .replace(/(?:Exactly one arrangement wins|Only \d+ of the \d+ arrangements win), and the opponent moves first\.\s*$/, '')
+    .replace(/\s*The opponent moves first\.\s*$/, '');
   els.ruleChips.innerHTML = '';
   for (const chip of ruleChips(puzzle)) {
     const span = document.createElement('span');
@@ -292,20 +300,14 @@ function setupHint(puzzle, remaining) {
   const piece = pieceName(state.tray.find((t) => !t.square)?.type);
   let hint;
   if (puzzle.placement?.allowed) {
-    hint = `Place your ${piece} on one of the ${puzzle.placement.allowed.length} highlighted squares.`;
+    hint = `Place your ${piece} on a highlighted square${remaining > 1 ? ` — ${remaining} pieces to go` : ''}.`;
   } else if (puzzle.placement?.blocked) {
-    hint = `Place your ${piece} anywhere except the ✕ squares — those win too obviously.`;
+    hint = `Place your ${piece} anywhere except the ✕ squares.`;
   } else if (puzzle.place.length > 1) {
-    hint = `Place ${remaining} more piece${remaining > 1 ? 's' : ''}. Click a placed piece to pick it back up.`;
+    hint = `Place ${remaining} more piece${remaining > 1 ? 's' : ''}.`;
   } else {
     hint = `Place your ${piece} anywhere.`;
   }
-  if (puzzle.solutions) {
-    hint += puzzle.solutions.length === 1
-      ? ' Exactly one placement wins.'
-      : ` ${puzzle.solutions.length} placements win.`;
-  }
-  if (puzzle.firstMove === 'opponent') hint += ' Careful: your opponent moves first!';
   return hint;
 }
 
