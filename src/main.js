@@ -11,7 +11,7 @@ import {
 } from './puzzle-contract.js';
 
 const MOVETIME_MS = 300; // per engine move during the playout
-const DEFAULT_ANIM_MS = 50; // piece-slide duration (user-adjustable via slider)
+const DEFAULT_ANIM_MS = 100; // piece-slide duration (user-adjustable via slider)
 
 /** Board slides for a move (castling moves the rook too). */
 function slidesFor(mv) {
