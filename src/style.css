@@ -62,6 +62,12 @@ main {
   padding: 0 0.15rem;
 }
 .material-line .mat-b { color: var(--muted); }
+@keyframes mat-pulse {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.45); color: #ffd24d; }
+  100% { transform: scale(1); }
+}
+.material-line span.pulse { animation: mat-pulse 0.55s ease-out; }
 
 /* While a piece is being pointer-dragged, no text may be selected */
 body.dragging, body.dragging * {

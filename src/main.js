@@ -80,6 +80,8 @@ function markPlayed(id) {
 // so the number reflects the full army the position will start with.
 const PIECE_VALUES = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 
+let lastMaterial = { id: null, w: null, b: null };
+
 function showMaterial(map, { includeTray = false } = {}) {
   const total = { w: 0, b: 0 };
   for (const piece of Object.values(map)) total[piece.color] += PIECE_VALUES[piece.type];
@@ -91,8 +93,14 @@ function showMaterial(map, { includeTray = false } = {}) {
     const span = document.createElement('span');
     span.className = `mat-${side}`;
     span.textContent = `${label} ${total[side]}`;
+    // Pulse a number that just changed (same puzzle only — loading a new
+    // puzzle shouldn't flash).
+    if (lastMaterial.id === state.puzzle.id && lastMaterial[side] !== total[side]) {
+      span.classList.add('pulse');
+    }
     els.materialLine.appendChild(span);
   }
+  lastMaterial = { id: state.puzzle.id, ...total };
 }
 
 // ---- State ----
