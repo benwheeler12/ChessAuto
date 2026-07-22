@@ -62,12 +62,11 @@ main {
   padding: 0 0.15rem;
 }
 .material-line .mat-b { color: var(--muted); }
-@keyframes mat-pulse {
-  0% { transform: scale(1); }
-  35% { transform: scale(1.45); color: #ffd24d; }
-  100% { transform: scale(1); }
-}
-.material-line span.pulse { animation: mat-pulse 0.55s ease-out; }
+/* Capture pulses are driven from JS: the counter jumps to a scaled-up
+   red/green peak instantly, then transitions slowly back to normal —
+   restarted (not cut short) by the next capture. */
+.material-line span { transform-origin: left center; }
+.material-line .mat-b { transform-origin: right center; }
 
 /* While a piece is being pointer-dragged, no text may be selected */
 body.dragging, body.dragging * {

@@ -40,6 +40,8 @@ const els = {
   nextPuzzle: $('next-puzzle'),
   puzzleName: $('puzzle-name'),
   materialLine: $('material-line'),
+  matW: $('mat-w'),
+  matB: $('mat-b'),
   puzzleDesc: $('puzzle-desc'),
   ruleChips: $('rule-chips'),
   status: $('status'),
@@ -82,23 +84,45 @@ const PIECE_VALUES = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 
 let lastMaterial = { id: null, w: null, b: null };
 
+/** Jump the counter to a scaled, colored peak, then decay slowly back to
+ * its normal size and color. A new pulse restarts the decay from the peak;
+ * nothing else interrupts it (the spans are persistent, so re-renders of
+ * the numbers don't touch the transition). */
+function pulseCounter(span, good) {
+  span.style.transition = 'none';
+  span.style.transform = 'scale(1.5)';
+  span.style.color = good ? '#6edc64' : '#e65041';
+  void span.offsetWidth; // commit the peak before enabling the decay
+  span.style.transition = 'transform 2.4s ease-out, color 2.4s ease-out';
+  span.style.transform = 'scale(1)';
+  span.style.color = ''; // decays back to the stylesheet color
+}
+
+function resetCounter(span) {
+  span.style.transition = 'none';
+  span.style.transform = '';
+  span.style.color = '';
+}
+
 function showMaterial(map, { includeTray = false } = {}) {
   const total = { w: 0, b: 0 };
   for (const piece of Object.values(map)) total[piece.color] += PIECE_VALUES[piece.type];
   if (includeTray) {
     for (const t of state.tray) if (!t.square) total[state.puzzle.player] += PIECE_VALUES[t.type];
   }
-  els.materialLine.innerHTML = '';
+  const spans = { w: els.matW, b: els.matB };
+  const samePuzzle = lastMaterial.id === state.puzzle.id;
   for (const [side, label] of [['w', 'White'], ['b', 'Black']]) {
-    const span = document.createElement('span');
-    span.className = `mat-${side}`;
-    span.textContent = `${label} ${total[side]}`;
-    // Pulse a number that just changed (same puzzle only — loading a new
-    // puzzle shouldn't flash).
-    if (lastMaterial.id === state.puzzle.id && lastMaterial[side] !== total[side]) {
-      span.classList.add('pulse');
+    spans[side].textContent = `${label} ${total[side]}`;
+    if (!samePuzzle) {
+      resetCounter(spans[side]);
+    } else if (lastMaterial[side] !== total[side]) {
+      // Green when the swing favors the player (opponent lost material, or
+      // the player promoted), red when it hurts them.
+      const delta = total[side] - lastMaterial[side];
+      const good = (side === state.puzzle.player) === (delta > 0);
+      pulseCounter(spans[side], good);
     }
-    els.materialLine.appendChild(span);
   }
   lastMaterial = { id: state.puzzle.id, ...total };
 }
